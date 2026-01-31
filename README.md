@@ -16,6 +16,30 @@ Evaluation framework for deep research agents with local/remote search engines a
 
 ---
 
+## Environment Setup
+
+### System Dependencies
+
+```bash
+sudo apt install -y openjdk-21-jdk
+```
+
+### Python Dependencies
+
+```bash
+uv sync
+```
+
+### Tevatron (for BrowseComp-Plus local search)
+
+```bash
+git clone https://github.com/texttron/tevatron.git
+cd tevatron
+cd ..
+```
+
+---
+
 ## Data Preparation
 
 ### Local Search Engine (For BrowseComp-Plus)
@@ -77,26 +101,6 @@ bash setup.sh
 - Install Tevatron for local search
 - Download Lucene JARs
 - Download corpus and indexes (optional, interactive)
-
-### Manual Installation
-
-**1. Install system dependencies:**
-```bash
-sudo apt install -y openjdk-21-jdk
-```
-
-**2. Install Python dependencies:**
-```bash
-uv sync
-```
-
-**3. Install Tevatron (for BrowseComp-Plus local search):**
-```bash
-git clone https://github.com/texttron/tevatron.git
-cd tevatron
-uv pip install -e .
-cd ..
-```
 
 ---
 
