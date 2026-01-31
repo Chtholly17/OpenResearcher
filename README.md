@@ -18,26 +18,7 @@ Evaluation framework for deep research agents with local/remote search engines a
 
 ## Data Preparation
 
-### Option A: Using Serper API (Recommended for Quick Start)
-
-If you only need to run evaluations using **Serper API** for web search, you only need to configure API keys:
-
-```bash
-cp .env.template .env
-```
-
-Edit `.env`:
-```bash
-# Serper API (for web search)
-SERPER_API_KEY=your_serper_api_key    # Get from: https://serper.dev/
-
-# OpenAI API (for evaluation)
-OPENAI_API_KEY=your_openai_api_key    # Get from: https://platform.openai.com/
-```
-
-This is sufficient for running evaluations on: `hle`, `gaia`, `webwalkerqa`, `xbench`, `seal`.
-
-### Option B: Local Search Engine (For BrowseComp-Plus)
+### Local Search Engine (For BrowseComp-Plus)
 
 To run **BrowseComp-Plus** benchmark with local search, you need to download the corpus and indexes:
 
@@ -114,16 +95,6 @@ uv sync
 git clone https://github.com/texttron/tevatron.git
 cd tevatron
 uv pip install -e .
-cd ..
-```
-
-**4. Download Lucene JARs:**
-```bash
-mkdir -p tevatron
-cd tevatron
-wget https://repo1.maven.org/maven2/org/apache/lucene/lucene-highlighter/9.9.1/lucene-highlighter-9.9.1.jar
-wget https://repo1.maven.org/maven2/org/apache/lucene/lucene-queries/9.9.1/lucene-queries-9.9.1.jar
-wget https://repo1.maven.org/maven2/org/apache/lucene/lucene-memory/9.9.1/lucene-memory-9.9.1.jar
 cd ..
 ```
 
