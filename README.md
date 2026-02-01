@@ -155,13 +155,7 @@ bash scripts/start_search_service.sh dense 8000
 bash scripts/start_nemotron_servers.sh 2 8001 0,1,2,3
 
 # Terminal 3: Run agent
-bash run_agent.sh \
-    results/browsecomp_plus/OpenResearcher_dense \
-    8001 \
-    2 \
-    browsecomp_plus \
-    local \
-    OpenResearcher/Nemotron-3-Nano-30B-A3B
+bash run_agent.sh    resultsbrowsecomp_pluspenResearcher_dense 8001 2 browsecomp_plus local OpenResearcher/Nemotron-3-Nano-30B-A3B
 ```
 
 **What this does:**
@@ -178,13 +172,7 @@ bash run_agent.sh \
 bash scripts/start_nemotron_servers.sh 2 8001 0,1,2,3
 
 # Terminal 2: Run agent with serper search backend
-bash run_agent.sh \
-    results/gaia/OpenResearcher_serper \
-    8001 \
-    2 \
-    gaia \
-    serper \
-    OpenResearcher/Nemotron-3-Nano-30B-A3B
+bash run_agent.sh results/gaia/OpenResearcher_serper 8001 2 gaia serper OpenResearcher/Nemotron-3-Nano-30B-A3B
 ```
 
 **Browser Backend Options:**
