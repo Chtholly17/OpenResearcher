@@ -5,7 +5,7 @@
 
 <div align="center" style="line-height: 1; margin-top: 16px;">
 
-[![Models](https://img.shields.io/badge/Models-FFD700?style=for-the-badge&logo=huggingface&logoColor=ffffff)](https://huggingface.co/OpenResearcher)
+[![Models](https://img.shields.io/badge/Models-CC9900?style=for-the-badge&logo=huggingface&logoColor=ffffff)](https://huggingface.co/OpenResearcher)
 [![Blog](https://img.shields.io/badge/Blog-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://openresearcher.github.io/)
 
 </div>
