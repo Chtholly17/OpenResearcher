@@ -193,6 +193,8 @@ For other parameters, please refer to [assets/docs/parameter.md](assets/docs/par
 | **XBench** | `xbench` | 100 | ZH | serper | DeepSearch benchmark with encrypted test cases |
 | **SealQA-ref** | `seal_ref` | 111 | EN | serper | With reference URLs |
 
+For other benchmarks, please refer to [assets/docs](assets/docs).
+
 ### Quick Commands
 
 | Scenario | Command |
@@ -217,4 +219,3 @@ python eval.py --input_dir results/browsecomp_plus_dense/OpenResearcher
 
 ## License
 
-For other benchmarks, please refer to [assets/docs](assets/docs).

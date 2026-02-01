@@ -71,6 +71,8 @@ bash scripts/start_search_service.sh [searcher_type] [port] [cuda_visible_device
 | `port` | `8000` | Port for search service |
 | `cuda_visible_devices` | `0` | GPU ID for dense searcher (ignored for BM25) |
 
+**Important!! You should make sure there is sufficient GPU memory for Dense search -- which would cost about 15GB
+
 **Examples:**
 ```bash
 # BM25 search (CPU-based, lightweight)
