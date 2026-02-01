@@ -1,37 +1,53 @@
-# 🔬 GPT-OSS DeepResearch Evaluation
+<div align="center">
+  <picture>
+      <img src="./assets/docs/openresearcher-logo.webp" width="100%">
+  </picture>
+</div>
+
+<hr>
+
+<div align="center" style="line-height: 1;">
+
+[![MODELS](https://img.shields.io/badge/Models-5EDDD2?style=for-the-badge&logo=huggingface&logoColor=ffffff&labelColor)](https://huggingface.co/OpenResearcher)
+[![Blog](https://img.shields.io/badge/Blog-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://openresearcher.github.io/)
+
+</div>
+
+<p align="center">
+🤗 <a href="https://huggingface.co/OpenResearcher" target="_blank">HuggingFace</a> ｜
+📰 <a href="https://openresearcher.github.io/" target="_blank">Blog</a>
+</p>
+
+# Introduction
 
 Evaluation framework for deep research agents with local/remote search engines and multiple LLM backends.
 
----
+## Table of Contents
 
-## 📋 Table of Contents
+- [Environment Setup](#environment-setup)
+- [Data Preparation](#data-preparation)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Get Started](#get-started)
+- [Benchmarks](#benchmarks)
+- [Evaluation](#evaluation)
 
-- [🗂️ Data Preparation](#data-preparation)
-- [📦 Installation](#installation)
-- [⚙️ Configuration](#configuration)
-- [🚀 Get Started](#get-started)
-- [📊 Benchmarks](#benchmarks)
-- [📝 Script Parameters](#script-parameters)
-- [📈 Evaluation](#evaluation)
+## Environment Setup
 
----
-
-## 🛠️ Environment Setup
-
-### 💻 System Dependencies
+### 1. System Dependencies
 
 ```bash
 sudo apt install -y openjdk-21-jdk
 ```
 
-### 🐍 Python Dependencies
+### 2. Python Dependencies
 
 ```bash
 uv venv --python 3.12
 source .venv/bin/activate
 ```
 
-### 🔍 Tevatron (for BrowseComp-Plus local search)
+### 3. Tevatron (for BrowseComp-Plus local search)
 
 ```bash
 uv pip install -e .
@@ -42,15 +58,13 @@ uv pip install -e .
 cd ..
 ```
 
----
+## Data Preparation
 
-## 🗂️ Data Preparation
-
-### 🔎 Local Search Engine (For BrowseComp-Plus)
+### Local Search Engine (For BrowseComp-Plus)
 
 To run **BrowseComp-Plus** benchmark with local search, you need to download the queries, corpus, and indexes:
 
-**1️⃣ Download BrowseComp-Plus Queries (Required):**
+**1. Download BrowseComp-Plus Queries (Required):**
 ```bash
 # Create data directory
 mkdir -p Tevatron/browsecomp-plus/data
@@ -61,7 +75,7 @@ hf download Tevatron/browsecomp-plus \
     --local-dir Tevatron/browsecomp-plus
 ```
 
-**2️⃣ Download BrowseComp-Plus Corpus:**
+**2. Download BrowseComp-Plus Corpus:**
 ```bash
 # Create corpus directory
 mkdir -p Tevatron/browsecomp-plus-corpus/data
@@ -73,7 +87,7 @@ hf download Tevatron/browsecomp-plus-corpus \
     --local-dir Tevatron/browsecomp-plus-corpus
 ```
 
-**3️⃣ Download Search Indexes:**
+**3. Download Search Indexes:**
 ```bash
 # BM25 Index (lightweight, recommended)
 hf download Tevatron/browsecomp-plus-indexes \
@@ -88,7 +102,7 @@ hf download Tevatron/browsecomp-plus-indexes \
     --local-dir Tevatron/browsecomp-plus-indexes
 ```
 
-**4️⃣ Download Lucene JARs (for BM25 highlighting):**
+**4. Download Lucene JARs (for BM25 highlighting):**
 ```bash
 mkdir -p tevatron
 cd tevatron
@@ -98,11 +112,9 @@ wget https://repo1.maven.org/maven2/org/apache/lucene/lucene-memory/9.9.1/lucene
 cd ..
 ```
 
----
+## Installation
 
-## 📦 Installation
-
-### ⚡ Quick Setup (Recommended)
+### Quick Setup (Recommended)
 
 Run the setup script to install all dependencies automatically:
 
@@ -110,18 +122,16 @@ Run the setup script to install all dependencies automatically:
 bash setup.sh
 ```
 
-**📌 This script will:**
-- ✅ Install Python 3.12 virtual environment using `uv`
-- ✅ Install all Python dependencies
-- ✅ Install Tevatron for local search
-- ✅ Download Lucene JARs
-- ✅ Download corpus and indexes (optional, interactive)
+This script will:
+- Install Python 3.12 virtual environment using `uv`
+- Install all Python dependencies
+- Install Tevatron for local search
+- Download Lucene JARs
+- Download corpus and indexes (optional, interactive)
 
----
+## Configuration
 
-## ⚙️ Configuration
-
-### 🔑 API Keys
+### API Keys
 
 Copy the template and configure your API keys:
 
@@ -138,13 +148,11 @@ SERPER_API_KEY=your_key        # Get from: https://serper.dev/
 OPENAI_API_KEY=your_key        # Get from: https://platform.openai.com/api-keys
 ```
 
----
+## Get Started
 
-## 🚀 Get Started
+### Example 1: BrowseComp-Plus with Local Search Engine
 
-### 📖 Example 1: BrowseComp-Plus with Local Search Engine
-
-**Complete workflow using local Dense search:**
+Complete workflow using local Dense search:
 
 ```bash
 # Terminal 1: Start local Dense search service on port 8000
@@ -158,14 +166,14 @@ bash scripts/start_nemotron_servers.sh 2 8001 0,1,2,3
 bash run_agent.sh results/browsecomp_plus/Researcher_dense 8001 2 browsecomp_plus local OpenResearcher/Nemotron-3-Nano-30B-A3B
 ```
 
-**💡 What this does:**
-- 🔍 Deploys Dense search on port 8000 as virtual search engine
-- 🖥️ Launches 2 vLLM servers (ports 8001, 8002) with TP=2 across 4 GPUs
-- 🤖 Runs agent with load balancing across both servers
+What this does:
+- Deploys Dense search on port 8000 as virtual search engine
+- Launches 2 vLLM servers (ports 8001, 8002) with TP=2 across 4 GPUs
+- Runs agent with load balancing across both servers
 
-### 📖 Example 2: Using Serper API (No Local Search Needed)
+### Example 2: Using Serper API (No Local Search Needed)
 
-**Run with Serper Google Search API:**
+Run with Serper Google Search API:
 
 ```bash
 # Terminal 1: Start vLLM servers (requires 4 GPUs)
@@ -175,39 +183,35 @@ bash scripts/start_nemotron_servers.sh 2 8001 0,1,2,3
 bash run_agent.sh results/gaia/OpenResearcher_serper 8001 2 gaia serper OpenResearcher/Nemotron-3-Nano-30B-A3B
 ```
 
-**🌐 Browser Backend Options:**
+**Browser Backend Options:**
 - `local` - Use local BM25/Dense search service (for BrowseComp-Plus)
 - `serper` - Use Serper Google Search API (for all other benchmarks)
 
-For other parameters, please refer to [📄 assets/docs/parameter.md](assets/docs/parameter.md).
+For other parameters, please refer to [assets/docs/parameter.md](assets/docs/parameter.md).
 
----
-
-## 📊 Benchmarks
+## Benchmarks
 
 | Benchmark | Dataset Key | Size | Language | Search Backend | Description |
 |-----------|-------------|------|----------|----------------|-------------|
-| 🌐 **BrowseComp** | `browsecomp` | 1266 | EN | serper | OpenAI public browse benchmark |
-| 🔬 **BrowseComp-Plus** | `browsecomp-plus` | 830 | EN | local | Deep-research benchmark isolating retriever and LLM agent effects |
-| 🤖 **GAIA-text** | `gaia` | 103 | EN | serper | Text-only subset of GAIA benchmark (dev split) |
-| 🇨🇳 **XBench** | `xbench` | 100 | ZH | serper | DeepSearch benchmark with encrypted test cases |
-| 📚 **SealQA-ref** | `seal_ref` | 111 | EN | serper | With reference URLs |
+| **BrowseComp** | `browsecomp` | 1266 | EN | serper | OpenAI public browse benchmark |
+| **BrowseComp-Plus** | `browsecomp-plus` | 830 | EN | local | Deep-research benchmark isolating retriever and LLM agent effects |
+| **GAIA-text** | `gaia` | 103 | EN | serper | Text-only subset of GAIA benchmark (dev split) |
+| **XBench** | `xbench` | 100 | ZH | serper | DeepSearch benchmark with encrypted test cases |
+| **SealQA-ref** | `seal_ref` | 111 | EN | serper | With reference URLs |
 
-For other benchmarks, please refer to [📁 assets/docs](assets/docs).
+For other benchmarks, please refer to [assets/docs](assets/docs).
 
-### ⚡ Quick Commands
+### Quick Commands
 
 | Scenario | Command |
 |----------|---------|
-| 🌐 **BrowseComp** | `bash run_agent.sh results/browsecomp 8001 2 browsecomp serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
-| 🔬 **BrowseComp+ (BM25)** | `bash scripts/start_search_service.sh bm25 8000` then `bash run_agent.sh results/browsecomp-plus/OpenResearcher_bm25 8001 2 browsecomp-plus local OpenResearcher/Nemotron-3-Nano-30B-A3B` |
-| 🔬 **BrowseComp+ (Dense)** | `bash scripts/start_search_service.sh dense 8000` then `bash run_agent.sh results/browsecomp-plus/OpenResearcher_dense 8001 2 browsecomp-plus local OpenResearcher/Nemotron-3-Nano-30B-A3B` |
-| 🤖 **GAIA** | `bash run_agent.sh results/gaia 8001 2 gaia serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
-| 🇨🇳 **XBench** | `bash run_agent.sh results/xbench 8001 2 xbench serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
+| **BrowseComp** | `bash run_agent.sh results/browsecomp 8001 2 browsecomp serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
+| **BrowseComp+ (BM25)** | `bash scripts/start_search_service.sh bm25 8000` then `bash run_agent.sh results/browsecomp-plus/OpenResearcher_bm25 8001 2 browsecomp-plus local OpenResearcher/Nemotron-3-Nano-30B-A3B` |
+| **BrowseComp+ (Dense)** | `bash scripts/start_search_service.sh dense 8000` then `bash run_agent.sh results/browsecomp-plus/OpenResearcher_dense 8001 2 browsecomp-plus local OpenResearcher/Nemotron-3-Nano-30B-A3B` |
+| **GAIA** | `bash run_agent.sh results/gaia 8001 2 gaia serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
+| **XBench** | `bash run_agent.sh results/xbench 8001 2 xbench serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
 
----
-
-## 📈 Evaluation
+## Evaluation
 
 After running experiments, evaluate results:
 
@@ -215,7 +219,5 @@ After running experiments, evaluate results:
 python eval.py --input_dir results/browsecomp_plus_dense/OpenResearcher
 ```
 
----
-
-## 📜 License
+## License
 
