@@ -1,6 +1,6 @@
 <p align="center">
   <img src="./assets/docs/or-logo1.png" height="82" style="vertical-align: middle;">
-  <img src="./assets/docs/openresearcher-title.svg" height="55" style="vertical-align: middle;"></p>
+  <img src="./assets/docs/openresearcher-title.svg" height="66" style="vertical-align: middle;"></p>
 
 <div align="center" style="line-height: 1; margin-top: 16px;">
 
