@@ -15,9 +15,12 @@
 📰 <a href="https://openresearcher.github.io/" target="_blank">Blog</a>
 </p>
 
-# Introduction
+## Introduction
 
-Evaluation framework for deep research agents with local/remote search engines and multiple LLM backends.
+Evaluation framework for deep research agents with local/remote search engines and multiple LLM backends. TODO
+TODO: teaser figure
+
+## 🏆 Experiments
 
 ## 📋 Table of Contents
 
