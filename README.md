@@ -1,15 +1,6 @@
 <p align="center">
   <img src="./assets/docs/or-logo1.png" height="82" style="vertical-align: middle;">
-    <span style="
-    background: linear-gradient(to right, #7BCFBD, #D5EFF3, #987BE4);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-weight: bold;
-    font-family: Arial, sans-serif;
-    font-size: 42px;
-    ">
-    OpenResearcher
-</span></p>
+  <img src="./assets/docs/openresearcher-title.svg" height="55" style="vertical-align: middle;"></p>
 
 <div align="center" style="line-height: 1; margin-top: 16px;">
 
