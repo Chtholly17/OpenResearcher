@@ -56,6 +56,7 @@ We run this repo on the following setup:
 Other hardware setups can also work, but remember to modify the corresponding parameters.
 ### Installation 
 ```bash
+sudo apt update 
 sudo apt install -y openjdk-21-jdk
 uv venv --python 3.12
 source .venv/bin/activate
