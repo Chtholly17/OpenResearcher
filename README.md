@@ -21,8 +21,9 @@
 
 ## Introduction
 
-Evaluation framework for deep research agents with local/remote search engines and multiple LLM backends. TODO
-TODO: set teaser (note file size: too large leading slow rendering)
+OpenResearcher is a fully open agentic large language model (30B-A3B) designed for long-horizon deep research scenarios.
+It achieves leading performance across a diverse set of DeepResearch benchmarks, including BrowseComp-Plus, BrowseComp, GAIA, and xbench-DeepSearch.
+We fully open-source the complete training and evaluation recipe—including data, model, training methodology, and evaluation pipeline—enabling broad reproducibility and empowering the community to train state-of-the-art deep-research models.
 
 ## 🏆 Experiments
 
