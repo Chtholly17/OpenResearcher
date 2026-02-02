@@ -15,16 +15,13 @@
 <p align="center">
 🤗 <a href="https://huggingface.co/OpenResearcher" target="_blank">HuggingFace</a> ｜
 💡 <a href="https://openresearcher.github.io/" target="_blank">Blog</a> ｜
-<img src="./assets/imgs/slack.png" width="14px" style="display:inline;"> <a href="https://join.slack.com/t/openresearcher/shared_invite/zt-3p0r32cky-PqtZkVjjWIAI14~XwcRMfQ" target="_blank">Slack</a> | <img src="./assets/imgs/wechat.svg" width="14px" style="display:inline;"> <a href="#" target="_blank">WeChat</a> |
+<img src="./assets/imgs/slack.png" width="14px" style="display:inline;"> <a href="https://join.slack.com/t/openresearcher/shared_invite/zt-3p0r32cky-PqtZkVjjWIAI14~XwcRMfQ" target="_blank">Slack</a> | <img src="./assets/imgs/wechat.svg" width="14px" style="display:inline;"> <a href="#" target="_blank">WeChat</a> 
 
 </p>
 
 ## Introduction
 
-**OpenResearcher** is a fully open agentic large language model (30B-A3B) designed for **long-horizon deep research** scenarios.
-It achieves **leading performance accross DeepResearch benchmarks**, including BrowseComp-Plus, BrowseComp, GAIA, and xbench-DeepSearch.
-We **fully open-source** the complete training and evaluation recipe—including data, model, training methodology, and evaluation pipeline—enabling broad reproducibility and empowering the community to train state-of-the-art deep-research models.
-
+**OpenResearcher** is a fully open agentic large language model (30B-A3B) designed for **long-horizon deep research** scenarios. It achieves an impressive **54.8%** accuracy on [BrowserComp-Plus](https://huggingface.co/spaces/Tevatron/BrowseComp-Plus), surpassing performance of `GPT-4.1`, `Claude-Opus-4`, `Gemini-2.5-Pro`, `DeepSeek-R1`, `Tongyi-DeepResearch`. We **fully open-source** the complete training and evaluation recipe—including data, model, training methodology, and evaluation pipeline for everyone to progress deep research and develop state-of-the-art models efficiently.
 <div align="center">
   <img src="assets/imgs/teaser.png" alt="OpenResearcher Teaser" width="100%" style="max-width: 850px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
 </div>
@@ -76,7 +73,7 @@ uv pip install -e .
 ### DeepResearch Benchmarks Preparation
 
 Run the setup script to automatically download the **[BrowserComp-Plus](https://arxiv.org/abs/2508.06600)** benchmark.  
-Other benchmarks, including **[BrowserComp](https://arxiv.org/abs/2504.12516)**, **[GAIA](https://arxiv.org/abs/2311.12983)**, **[xbench-DeepResearch](https://github.com/THUDM/xbench)** and **[SEAL-0](https://arxiv.org/abs/2506.01062)**, will be set up automatically when they are first used.
+Other benchmarks, including **[BrowserComp](https://arxiv.org/abs/2504.12516)**, **[GAIA](https://arxiv.org/abs/2311.12983)** and **[xbench-DeepResearch](https://github.com/THUDM/xbench)****, will be set up automatically when they are first used.
 
 ```bash
 bash setup.sh
@@ -168,7 +165,6 @@ We benchmark our OpenResearcher-30B-A3B using below deepresearch benchmarks:
 | **[BrowseComp](https://arxiv.org/abs/2504.12516)** | `browsecomp` | 103 | EN | serper | A Simple Yet Challenging Benchmark for Browsing Agents |
 | **[GAIA-text](https://arxiv.org/abs/2311.12983)** | `gaia` | 103 | EN | serper | Text-only subset of GAIA benchmark (dev split) |
 | **[xbench-DeepResearch](https://github.com/THUDM/xbench)** | `xbench` | 100 | ZH | serper | DeepSearch benchmark with encrypted test cases |
-| **[SEAL-0](https://arxiv.org/abs/2506.01062)** | `seal` | 111 | EN | serper | Hardest subset of SealQA questions |
 
 For more info about these deepresearch benchmarks, see [benchmarks.md](assets/docs/benchmarks.md) 
 
@@ -182,7 +178,6 @@ For more info about these deepresearch benchmarks, see [benchmarks.md](assets/do
 | **BrowseComp** | `bash run_agent.sh results/browsecomp 8001 2 browsecomp serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
 | **GAIA** | `bash run_agent.sh results/gaia 8001 2 gaia serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
 | **xbench-DeepResearch** | `bash run_agent.sh results/xbench 8001 2 xbench serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
-| **SEAL-0** | `bash run_agent.sh results/seal 8001 2 seal serper OpenResearcher/Nemotron-3-Nano-30B-A3B` |
 
 **Note:** Don't forget to evaluate your results using:  
 ```bash
