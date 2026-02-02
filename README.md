@@ -7,8 +7,8 @@
 [![Models](https://img.shields.io/badge/Models-FFD966?style=for-the-badge&logo=huggingface&logoColor=ffffff)](https://huggingface.co/OpenResearcher)
 [![Datasets](https://img.shields.io/badge/Datasets-FFB7B2?style=for-the-badge&logo=huggingface&logoColor=ffffff)](#)
 [![Blog](https://img.shields.io/badge/Blog-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://openresearcher.github.io/)
-[![WandB Logs](https://img.shields.io/badge/WandB%20Logs-B5EAD7?style=for-the-badge&logo=weightsandbiases&logoColor=white)](#)
-[![Eval Logs](https://img.shields.io/badge/Eval%20Logs-C7CEEA?style=for-the-badge&logo=weightsandbiases&logoColor=white)](#)
+[![WandB Logs](https://img.shields.io/badge/WandB%20Logs-48B5A3?style=for-the-badge&logo=weightsandbiases&logoColor=white)](#)
+[![Eval Logs](https://img.shields.io/badge/Eval%20Logs-755BB4?style=for-the-badge&logo=weightsandbiases&logoColor=white)](#)
 
 </div>
 
