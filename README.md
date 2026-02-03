@@ -269,13 +269,15 @@ We are truly looking forward to open-source contributions to OpenResearcher! If 
 We are also looking forward to your feedback and suggestions!
 
 ##  📚 Citation
-TODO: update 
+
 ```bibtex
-@misc{deepscaler2025,
-  title={DeepScaleR: Surpassing O1-Preview with a 1.5B Model by Scaling RL},
-  author={Michael Luo and Sijun Tan and Justin Wong and Xiaoxiang Shi and William Y. Tang and Manan Roongta and Colin Cai and Jeffrey Luo and Li Erran Li and Raluca Ada Popa and Ion Stoica},
-  howpublished={\url{https://pretty-radio-b75.notion.site/DeepScaleR-Surpassing-O1-Preview-with-a-1-5B-Model-by-Scaling-RL-19681902c1468005bed8ca303013a4e2}},
-  note={Notion Blog},
-  year={2025}
+@misc{li2025openresearcher,
+  title={OpenResearcher: A Fully Open Pipeline for Long-Horizon Deep Research Trajectory Synthesis},
+  author={Zhuofeng Li and Dongfu Jiang and Xueguang Ma and Haoxiang Zhang and Yuyu Zhang and Kai Zou and Ping Nie and Jianwen Xie and Yu Zhang and Wenhu Chen},
+  year={2025},
+  howpublished={\url{https://www.notion.so/OpenResearcher-A-Fully-Open-Pipeline-for-Long-Horizon-Deep-Research-Trajectory-Synthesis-2f7e290627b5800cb3a0cd7e8d6ec0ea}},
+  note={Notion Blog}
 }
 ```
+
+
