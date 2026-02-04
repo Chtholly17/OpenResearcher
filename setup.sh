@@ -35,10 +35,10 @@ echo -e "\n${YELLOW}[3/6] Installing Python packages...${NC}"
 source .venv/bin/activate
 
 # Install Python dependencies
-uv pip install vllm gpt-oss[all] datasets faiss-cpu pyserini transformers \
-    fastapi duckdb loguru qwen_omni_utils peft httpx[http2] colorama \
-    ipykernel prettytable
-echo -e "${GREEN}✓ Python packages installed${NC}"
+# uv pip install vllm gpt-oss[all] datasets faiss-cpu pyserini transformers \
+#     fastapi duckdb loguru qwen_omni_utils peft httpx[http2] colorama \
+#     ipykernel prettytable
+# echo -e "${GREEN}✓ Python packages installed${NC}"
 
 # Install OpenJDK 21
 echo -e "\n${YELLOW}[4/6] Installing OpenJDK 21...${NC}"
