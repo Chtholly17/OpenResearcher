@@ -221,7 +221,7 @@ After running experiments, evaluate results:
 
 ```bash
 # eval on browsecomp_plus
-python eval.py --input_dir results/browsecomp_plus_dense/OpenResearcher
+python eval.py --input_dir results/browsecomp_plus_dense/OpenResearcher_dense
 
 # eval on gaia
 python eval.py --input_dir results/gaia/OpenResearcher_serper
