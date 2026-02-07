@@ -177,7 +177,7 @@ For more info about these deep research benchmarks, see [benchmarks.md](assets/d
 
 ### Example 1: BrowseComp-Plus with Local Search Engine
 
-Complete evaluation using local dense search (**note: only applicable for BrowseComp-Plus**):
+Complete evaluation using local dense search with browsecomp-plus [corpus](https://huggingface.co/datasets/Tevatron/browsecomp-plus-corpus) and [embeddings](https://huggingface.co/datasets/Tevatron/browsecomp-plus-indexes/tree/main/qwen3-embedding-8b) (**note: only applicable for BrowseComp-Plus**):
 
 ```bash
 # Terminal 1: Start local Dense search service on port 8000
