@@ -128,7 +128,9 @@ OPENAI_API_KEY=your_key        # Get from: https://platform.openai.com/api-keys
 bash scripts/start_nemotron_servers.sh
 ```
 
-2. **Run your first task**: 
+The complete vLLM server logs can be found in the `logs` directory.
+
+2. **Run your first task** (Before proceeding, check the logs in `logs` directory to ensure the vLLM server is deployed.)
 
 ```python
 import asyncio
