@@ -170,7 +170,7 @@ We benchmark our OpenResearcher-30B-A3B using below deep research benchmarks:
 | Benchmark | Dataset Key | Size | Language | Search Backend | Description |
 |-----------|-------------|------|----------|----------------|-------------|
 | [BrowseComp-Plus](https://arxiv.org/abs/2508.06600) | `browsecomp_plus` | 830 | EN | local | Deep-research benchmark from BrowseComp isolating retriever and LLM agent effects |
-| [BrowseComp](https://arxiv.org/abs/2504.12516) | `browsecomp` | 103 | EN | serper | A Simple Yet Challenging Benchmark for Browsing Agents |
+| [BrowseComp](https://arxiv.org/abs/2504.12516) | `browsecomp` | 1,266 | EN | serper | A Simple Yet Challenging Benchmark for Browsing Agents |
 | [GAIA-text](https://arxiv.org/abs/2311.12983) | `gaia` | 103 | EN | serper | Text-only subset of GAIA benchmark (dev split) |
 | [xbench-DeepResearch](https://github.com/THUDM/xbench) | `xbench` | 100 | ZH | serper | DeepSearch benchmark with encrypted test cases |
 
