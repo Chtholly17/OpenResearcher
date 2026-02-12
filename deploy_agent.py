@@ -22,14 +22,24 @@ import re
 
 dotenv.load_dotenv()
 
+# Global verbose flag and helper print that can be controlled by CLI
+VERBOSE = False
+
+
+def vprint(*args, **kwargs):
+    """Verbose print: only prints when VERBOSE is True."""
+    # print(*args, **kwargs)
+    if VERBOSE:
+        print(*args, **kwargs)
+
 os.environ["VLLM_DISABLE_COMPILE_CACHE"] = "1"
 
 # Pre-import transformers in main process to avoid multiprocessing issues
 try:
     import transformers
-    print(f"Pre-loaded transformers version: {transformers.__version__}")
+    vprint(f"Pre-loaded transformers version: {transformers.__version__}")
 except ImportError:
-    print("Warning: transformers not available")
+    vprint("Warning: transformers not available")
 
 def _extract_text_from_harmony(messages: List[Message]) -> str:
     """Extract text content from Harmony messages.
@@ -134,7 +144,7 @@ async def _generate_with_retry(
                     # Check if we hit any stop string
                     for stop_str in stop_strings:
                         if stop_str in accumulated_text:
-                            print(f"[DEBUG] Client-side stop detected: found '{stop_str}' in generated text")
+                            vprint(f"[DEBUG] Client-side stop detected: found '{stop_str}' in generated text")
                             break
                     else:
                         continue
@@ -149,14 +159,14 @@ async def _generate_with_retry(
                     pos = generated_text.find(stop_str)
                     generated_text = generated_text[:pos]
 
-            print(f"[DEBUG] Generated {len(generated_tokens)} tokens, text length: {len(generated_text)}")
+            vprint(f"[DEBUG] Generated {len(generated_tokens)} tokens, text length: {len(generated_text)}")
             return generated_text
 
         except Exception as e:
             last_exception = e
-            print(f"\n--- Generation failed on attempt {attempt}/{max_retries} ---")
+            vprint(f"\n--- Generation failed on attempt {attempt}/{max_retries} ---")
             import traceback as _tb
-            print(_tb.format_exc())
+            vprint(_tb.format_exc())
 
         finally:
             try:
@@ -212,9 +222,9 @@ async def run_one(
         while round_num < max_rounds:
             round_num += 1
 
-            print(f"\n{'='*60}")
-            print(f"Round {round_num}")
-            print(f"{'='*60}")
+            vprint(f"\n{'='*60}")
+            vprint(f"Round {round_num}")
+            vprint(f"{'='*60}")
 
             # Use tokenizer.apply_chat_template with tools parameter
             prompt = generator.tokenizer.apply_chat_template(
@@ -229,7 +239,7 @@ async def run_one(
             content = await _generate_with_retry(generator, tokens, stop_strings)
             non_thinking_content = content
 
-            print(f'[NATIVE_TOOLS] Round {round_num}: {content[:500] if len(content) > 500 else content}')
+            vprint(f'[NATIVE_TOOLS] Round {round_num}: {content[:500] if len(content) > 500 else content}')
 
             # Remove tool_response marker if present
             if '<tool_response>' in content:
@@ -285,13 +295,13 @@ async def run_one(
                             "arguments": parsed_tool_call.get("arguments", {})
                         }
                     }]
-                    print(f"[NATIVE_TOOLS] Parsed tool call (JSON): {parsed_tool_call}")
+                    vprint(f"[NATIVE_TOOLS] Parsed tool call (JSON): {parsed_tool_call}")
                 except Exception as e:
                     # Fallback: Try to parse XML format
                     # <function=browser.search>
                     # <parameter=query>value</parameter>
                     # </function>
-                    print(f"[NATIVE_TOOLS] JSON parsing failed, trying XML format: {e}")
+                    vprint(f"[NATIVE_TOOLS] JSON parsing failed, trying XML format: {e}")
                     # Match function name (allow dots and other characters)
                     func_match = re.search(r'<function=([\w.]+)>', tool_call_text)
                     if func_match:
@@ -322,14 +332,14 @@ async def run_one(
                                 "arguments": tool_args
                             }
                         }]
-                        print(f"[NATIVE_TOOLS] Parsed tool call (XML): name={tool_name}, args={tool_args}")
+                        vprint(f"[NATIVE_TOOLS] Parsed tool call (XML): name={tool_name}, args={tool_args}")
                     else:
-                        print(f"[NATIVE_TOOLS] Failed to parse tool call in both JSON and XML formats")
-                        print(f"[NATIVE_TOOLS] Tool call text: {tool_call_text}")
+                        vprint(f"[NATIVE_TOOLS] Failed to parse tool call in both JSON and XML formats")
+                        vprint(f"[NATIVE_TOOLS] Tool call text: {tool_call_text}")
 
-            print(f"[NATIVE_TOOLS] Assistant response (cleaned):\n{content}")
+            vprint(f"[NATIVE_TOOLS] Assistant response (cleaned):\n{content}")
             if reasoning_content:
-                print(f"[NATIVE_TOOLS] Reasoning content:\n{reasoning_content}")
+                vprint(f"[NATIVE_TOOLS] Reasoning content:\n{reasoning_content}")
 
             if tool_call_text is None:
                 non_thinking_content = non_thinking_content.split('</think>', 1)[1].strip() if '</think>' in non_thinking_content else non_thinking_content.strip()
@@ -342,7 +352,7 @@ async def run_one(
 
             # Check if there are tool calls
             if parsed_tool_calls:
-                print(f"[NATIVE_TOOLS] Tool calls: {len(parsed_tool_calls)}")
+                vprint(f"[NATIVE_TOOLS] Tool calls: {len(parsed_tool_calls)}")
 
                 # Execute each tool call
                 for tool_call in parsed_tool_calls:
@@ -356,10 +366,10 @@ async def run_one(
                             function_args = function_args_raw
                         else:
                             function_args = json.loads(function_args_raw)
-                        print(f"\n[NATIVE_TOOLS] === Tool Call ===")
-                        print(f"[NATIVE_TOOLS] Tool ID: {tool_id}")
-                        print(f"[NATIVE_TOOLS] Function: {function_name}")
-                        print(f"[NATIVE_TOOLS] Arguments (full):\n{json.dumps(function_args, indent=2, ensure_ascii=False)}")
+                        vprint(f"\n[NATIVE_TOOLS] === Tool Call ===")
+                        vprint(f"[NATIVE_TOOLS] Tool ID: {tool_id}")
+                        vprint(f"[NATIVE_TOOLS] Function: {function_name}")
+                        vprint(f"[NATIVE_TOOLS] Arguments (full):\n{json.dumps(function_args, indent=2, ensure_ascii=False)}")
 
                         # Extract actual function name from browser.xxx format
                         if function_name.startswith("browser."):
@@ -382,12 +392,12 @@ async def run_one(
                             "content": result
                         })
 
-                        print(f"[NATIVE_TOOLS] Tool Result (full):\n{result}")
-                        print(f"[NATIVE_TOOLS] === End Tool Call ===\n")
+                        vprint(f"[NATIVE_TOOLS] Tool Result (full):\n{result}")
+                        vprint(f"[NATIVE_TOOLS] === End Tool Call ===\n")
 
                     except Exception as e:
                         error_msg = f"Error executing {function_name}: {str(e)}"
-                        print(f"[NATIVE_TOOLS] Error: {error_msg}")
+                        vprint(f"[NATIVE_TOOLS] Error: {error_msg}")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_id,
@@ -400,15 +410,15 @@ async def run_one(
             # Check for answer termination
             content_lower = content.lower()
             if '<answer>' in content_lower and '</answer>' in content_lower:
-                print(f"\n✅ Found <answer> tag - conversation completed")
+                vprint(f"\n✅ Found <answer> tag - conversation completed")
                 break
 
             if "exact answer:" in content_lower and "confidence:" in content_lower:
-                print(f"\n✅ Found 'Exact Answer:' and 'Confidence:' - conversation completed")
+                vprint(f"\n✅ Found 'Exact Answer:' and 'Confidence:' - conversation completed")
                 break
 
             if "final answer:" in content_lower or "answer:" in content_lower:
-                print(f"\n✅ Found 'Final Answer:' or 'Answer:' - conversation completed")
+                vprint(f"\n✅ Found 'Final Answer:' or 'Answer:' - conversation completed")
                 break
 
         return messages
@@ -423,6 +433,9 @@ def worker_entry(
     args,
     gpu_ids,
 ):
+    # Initialize verbose flag inside each worker process
+    global VERBOSE
+    VERBOSE = getattr(args, "verbose", False)
     # Set visible GPUs for this worker (empty list for API mode)
     if gpu_ids:
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(gid) for gid in gpu_ids)
@@ -451,7 +464,7 @@ def worker_entry(
                     use_native_tools=True
                 )
 
-                print(f"[Worker {worker_idx}] Using OpenAI API (native function calling) at {server_url}")
+                vprint(f"[Worker {worker_idx}] Using OpenAI API (native function calling) at {server_url}")
             else:
                 # Use local vLLM engine (slow startup)
                 from utils.vllm_generator import vLLMAsyncGenerator
@@ -459,7 +472,7 @@ def worker_entry(
                     args.model_name_or_path,
                     tensor_parallel_size=args.tensor_parallel_size
                 )
-                print(f"[Worker {worker_idx}] Using local vLLM engine")
+                vprint(f"[Worker {worker_idx}] Using local vLLM engine")
 
 
             browser_pool = BrowserPool(args.search_url, browser_backend=args.browser_backend)
@@ -471,7 +484,7 @@ def worker_entry(
             # Load completed tasks from ALL shard files (not just completed_qids.txt)
             # This ensures we don't reprocess tasks even if they were completed by different workers
             processed_qids = set()
-            print(f"[Worker {worker_idx}] Scanning all shard files for completed tasks...")
+            vprint(f"[Worker {worker_idx}] Scanning all shard files for completed tasks...")
 
             for shard_file in glob.glob(os.path.join(args.output_dir, "node_*_shard_*.jsonl")):
                 try:
@@ -483,9 +496,9 @@ def worker_entry(
                             except Exception:
                                 continue
                 except Exception as e:
-                    print(f"[Worker {worker_idx}] Warning: Could not read {shard_file}: {e}")
+                    vprint(f"[Worker {worker_idx}] Warning: Could not read {shard_file}: {e}")
 
-            print(f"[Worker {worker_idx}] Found {len(processed_qids)} completed tasks across all shards.")
+            vprint(f"[Worker {worker_idx}] Found {len(processed_qids)} completed tasks across all shards.")
 
             # Load dataset using unified loader
             # If data_path provided, pass it (for backward compatibility with browsecomp-plus)
@@ -494,7 +507,16 @@ def worker_entry(
                 data = load_dataset(args.dataset_name, data_path=args.data_path)
             else:
                 # New unified mode: load from HuggingFace
-                data = load_dataset(args.dataset_name)
+                # support of input subset and split
+                # for example, if arg.dataset_name = OpenResearcher/OpenResearcher-Dataset@seed_42:train
+                # then the huggingface path is OpenResearcher/OpenResearcher-Dataset
+                # the subset is seed_42 and the split is train
+                # extract path, subset, split from args.dataset_name
+                from datasets import load_dataset as hf_load_dataset
+                path, subset_and_split = args.dataset_name.split('@')
+                subset, split = subset_and_split.split(':')
+                data = hf_load_dataset(path, data_dir=subset, split=split)
+                # data = load_dataset(args.dataset_name)
 
             total_workers = node_size * num_workers
             global_worker_idx = num_workers * node_rank + worker_idx
@@ -504,12 +526,12 @@ def worker_entry(
             all_unprocessed_tasks = [x for x in data if x['qid'] not in processed_qids]
             tasks_to_process = all_unprocessed_tasks[global_worker_idx::total_workers]
 
-            print(f"[Worker {worker_idx}] Total tasks: {len(data)}, "
-                  f"Unprocessed: {len(all_unprocessed_tasks)}, "
-                  f"Assigned to this worker: {len(tasks_to_process)}")
+            vprint(f"[Worker {worker_idx}] Total tasks: {len(data)}, "
+                   f"Unprocessed: {len(all_unprocessed_tasks)}, "
+                   f"Assigned to this worker: {len(tasks_to_process)}")
             
             if not tasks_to_process:
-                print(f"[Worker {worker_idx}] Nothing to do.")
+                vprint(f"[Worker {worker_idx}] Nothing to do.")
                 return
 
             async def process_item(item_data: dict) -> dict:
@@ -537,20 +559,50 @@ def worker_entry(
                             return rec
                         except Exception as e:
                             error_msg = traceback.format_exc()
-                            print(f"[Worker {worker_idx}] qid {qid} attempt {attempt}/{MAX_RETRY} failed: {e}")
+                            vprint(f"[Worker {worker_idx}] qid {qid} attempt {attempt}/{MAX_RETRY} failed: {e}")
                     rec = item_data.copy()
                     rec.update({"messages": [], "latency_s": 0.0, "error": error_msg, "attempts": attempt, "status":"fail"})
                     return rec
 
             tasks = [asyncio.create_task(process_item(task)) for task in tasks_to_process]
 
+            # Use a tqdm progress bar and route all prints through tqdm.write
+            # so that the bar stays fixed at the bottom of the terminal.
+            import builtins
+            original_print = builtins.print
+
+            def _tqdm_print(*args, **kwargs):
+                # Emulate basic print(...) behavior, but go through tqdm.write
+                sep = kwargs.get("sep", " ")
+                end = kwargs.get("end", "\n")
+                file = kwargs.get("file", None)
+                s = sep.join(str(a) for a in args) + ("" if end == "" else end)
+                try:
+                    tqdm.tqdm.write(s, file=file)
+                except Exception:
+                    original_print(*args, **kwargs)
+
+            builtins.print = _tqdm_print
+
             with open(shard_path, "a", encoding="utf-8") as writer:
-                for fut in tqdm.tqdm(asyncio.as_completed(tasks), total=len(tasks), desc=f"Worker {worker_idx}"):
-                    rec = await fut
-                    writer.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                    writer.flush()
+                progress_bar = tqdm.tqdm(
+                    total=len(tasks_to_process),
+                    desc=f"Worker {worker_idx} progress",
+                    leave=True,
+                    dynamic_ncols=True,
+                )
+
+                try:
+                    for fut in asyncio.as_completed(tasks):
+                        rec = await fut
+                        writer.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                        writer.flush()
+                        progress_bar.update(1)
+                finally:
+                    progress_bar.close()
+                    builtins.print = original_print
         finally:
-            print(f"[Worker {worker_idx}] Done.")
+            vprint(f"[Worker {worker_idx}] Done.")
 
     asyncio.run(_run())
     
@@ -574,9 +626,19 @@ def main():
                              "Single URL: http://localhost:8001/v1 "
                              "Multiple URLs (comma-separated): http://localhost:8001/v1,http://localhost:8002/v1 "
                              "If provided, will use API instead of local vLLM engine (recommended for faster startup)")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging (detailed progress and debug output)",
+    )
 
     args = parser.parse_args()
-    print(args)
+
+    # Set global verbose flag
+    global VERBOSE
+    VERBOSE = getattr(args, "verbose", False)
+
+    vprint(args)
 
     # Auto-detect number of available CUDA devices
     import torch
@@ -590,10 +652,10 @@ def main():
         NUM_WORKERS = len(server_urls)
         available_gpu_ids = []
 
-        print(f"Using {NUM_WORKERS} external vLLM server(s):")
+        vprint(f"Using {NUM_WORKERS} external vLLM server(s):")
         for i, url in enumerate(server_urls):
-            print(f"  - Server {i+1}: {url}")
-        print(f"Launching {NUM_WORKERS} worker(s) (CPU-based, no local model loading)")
+            vprint(f"  - Server {i+1}: {url}")
+        vprint(f"Launching {NUM_WORKERS} worker(s) (CPU-based, no local model loading)")
     else:
         # Using local vLLM engine - need GPU allocation
         # Get the list of available GPU IDs from CUDA_VISIBLE_DEVICES
@@ -601,12 +663,12 @@ def main():
         if cuda_visible_devices is not None:
             # User specified GPU IDs
             available_gpu_ids = [int(x.strip()) for x in cuda_visible_devices.split(",") if x.strip()]
-            print(f"Using user-specified GPUs: {available_gpu_ids}")
+            vprint(f"Using user-specified GPUs: {available_gpu_ids}")
         else:
             # Auto-detect all available GPUs
             num_gpus = torch.cuda.device_count()
             available_gpu_ids = list(range(num_gpus))
-            print(f"Auto-detected {num_gpus} CUDA device(s)")
+            vprint(f"Auto-detected {num_gpus} CUDA device(s)")
 
         if len(available_gpu_ids) == 0:
             raise RuntimeError("No CUDA devices found. Cannot proceed without GPUs.")
@@ -620,12 +682,12 @@ def main():
             )
 
         NUM_WORKERS = len(available_gpu_ids) // tp_size
-        print(f"Launching {NUM_WORKERS} worker(s) with tensor_parallel_size={tp_size}")
+        vprint(f"Launching {NUM_WORKERS} worker(s) with tensor_parallel_size={tp_size}")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Scan all existing shard files and collect completed qids
-    print("Scanning for completed tasks across all shards...")
+    vprint("Scanning for completed tasks across all shards...")
     completed_qids = set()
     node_rank = int(os.getenv("RANK", 0))
 
@@ -640,18 +702,18 @@ def main():
                     except Exception:
                         continue
         except Exception as e:
-            print(f"Warning: Could not read {shard_file}: {e}")
+            vprint(f"Warning: Could not read {shard_file}: {e}")
 
     if completed_qids:
-        print(f"Found {len(completed_qids)} completed tasks from existing shards.")
+        vprint(f"Found {len(completed_qids)} completed tasks from existing shards.")
         # Write to global completed file
         global_completed_path = os.path.join(args.output_dir, "completed_qids.txt")
         with open(global_completed_path, "w", encoding="utf-8") as f:
             for qid in sorted(completed_qids):
                 f.write(f"{qid}\n")
-        print(f"Wrote completed qids to {global_completed_path}")
+        vprint(f"Wrote completed qids to {global_completed_path}")
     else:
-        print("No completed tasks found. Starting fresh.")
+        vprint("No completed tasks found. Starting fresh.")
 
     procs: List[mp.Process] = []
     for i in range(NUM_WORKERS):
@@ -660,14 +722,14 @@ def main():
             worker_gpu_ids = []
             if hasattr(args, 'vllm_server_urls') and len(args.vllm_server_urls) > 1:
                 server_url = args.vllm_server_urls[i % len(args.vllm_server_urls)]
-                print(f"Worker {i} → Server: {server_url}")
+                vprint(f"Worker {i} → Server: {server_url}")
             else:
-                print(f"Worker {i} → Server: {args.vllm_server_url}")
+                vprint(f"Worker {i} → Server: {args.vllm_server_url}")
         else:
             # Assign GPU IDs for this worker based on tensor parallelism
             tp_size = args.tensor_parallel_size
             worker_gpu_ids = available_gpu_ids[i * tp_size:(i + 1) * tp_size]
-            print(f"Worker {i} assigned GPUs: {worker_gpu_ids}")
+            vprint(f"Worker {i} assigned GPUs: {worker_gpu_ids}")
 
         p = mp.Process(
             target=worker_entry,
@@ -679,9 +741,9 @@ def main():
     for p in procs:
         p.join(timeout=None)
         if p.exitcode != 0:
-            print(f"Worker process {p.pid} exited with code {p.exitcode}")
+            vprint(f"Worker process {p.pid} exited with code {p.exitcode}")
 
-    print("All workers finished. Script done.")
+    vprint("All workers finished. Script done.")
 
 if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)

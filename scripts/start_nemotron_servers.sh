@@ -75,6 +75,8 @@ for i in $(seq 0 $((NUM_SERVERS-1))); do
         --port $PORT \
         --tensor_parallel_size $TP_SIZE \
         --gpu_memory_utilization 0.9 \
+        --temperature 1.0 \
+        --top_p 0.95 \
         > "$LOG_FILE" 2>&1 &
 
     PID=$!
