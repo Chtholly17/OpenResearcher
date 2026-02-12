@@ -18,8 +18,6 @@ def main():
     parser.add_argument("--tensor_parallel_size", type=int, default=1, help="Tensor parallel size")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.95, help="GPU memory utilization")
     parser.add_argument("--max_model_len", type=int, default=None, help="Max model length")
-    parser.add_argument("--temperature", type=float, default=1.0, help="Temperature")
-    parser.add_argument("--top_p", type=float, default=0.95, help="Top p")
     args = parser.parse_args()
 
     # Build vLLM command
@@ -37,10 +35,6 @@ def main():
     if args.max_model_len:
         cmd_parts.extend(["--max-model-len", str(args.max_model_len)])
     
-    if args.temperature:
-        cmd_parts.extend(["--temperature", str(args.temperature)])
-    if args.top_p:
-        cmd_parts.extend(["--top-p", str(args.top_p)])
 
     # Print info
     print("=" * 80)
