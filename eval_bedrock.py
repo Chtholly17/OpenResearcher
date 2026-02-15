@@ -12,6 +12,8 @@ from botocore.exceptions import ClientError
 from prettytable import PrettyTable
 from tqdm import tqdm
 
+os.environ['AWS_BEARER_TOKEN_BEDROCK'] = "your_bedrock_token"
+
 from eval import (
     GRADER_TEMPLATE,
     ThreadRateLimiter,
@@ -274,3 +276,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print("Evaluation completed successfully.")

@@ -1,1 +1,0 @@
-bash run_agent.sh results/OR_dataset/OpenResearcher_serper 8001 3 OpenResearcher/OpenResearcher-Dataset@seed_42:train local OpenResearcher/OpenResearcher-30B-A3B

@@ -10,6 +10,8 @@ async def main():
         use_native_tools=True
     )
     browser_pool = BrowserPool(search_url="http://localhost:8000", browser_backend="local")
+    # browser_pool = BrowserPool(search_url=None, browser_backend="serper")
+
 
     # Run deep research
     await run_one(
