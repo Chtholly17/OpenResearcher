@@ -1,0 +1,4 @@
+interaction:
+  - name: "openresearcher"
+    class_name: "verl_rl.interactions.openresearcher_interaction.OpenResearcherInteraction"
+    config: {}

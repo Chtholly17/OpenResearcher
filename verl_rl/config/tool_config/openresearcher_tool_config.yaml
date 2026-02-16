@@ -1,0 +1,92 @@
+tools:
+  # --- browser.search ---
+  - class_name: "verl_rl.tools.browser_search_tool.BrowserSearchTool"
+    config:
+      type: native
+      # URL of the search backend (BM25 or Dense retrieval service)
+      # This is the same service used during SFT data collection and inference.
+      # Must be running during RL training rollouts.
+      search_service_url: "http://127.0.0.1:8090/search"
+      topn: 10
+      num_workers: 64
+      rate_limit: 64
+      timeout: 30
+    tool_schema:
+      type: "function"
+      function:
+        name: "browser.search"
+        description: >
+          Searches for information related to a query and displays top N results.
+          Returns a list of search results with titles, URLs, and summaries.
+        parameters:
+          type: "object"
+          properties:
+            query:
+              type: "string"
+              description: "The search query string"
+            topn:
+              type: "integer"
+              description: "Number of results to display (default: 10)"
+          required: ["query"]
+
+  # --- browser.open ---
+  - class_name: "verl_rl.tools.browser_open_tool.BrowserOpenTool"
+    config:
+      type: native
+      # Uses the same search service; the open endpoint retrieves document content
+      search_service_url: "http://127.0.0.1:8090"
+      num_lines: 100
+      timeout: 30
+    tool_schema:
+      type: "function"
+      function:
+        name: "browser.open"
+        description: >
+          Opens a link from the current page or a fully qualified URL.
+          Can scroll to a specific location and display a specific number of lines.
+          Valid link ids are displayed with the formatting: [{id}+.*].
+        parameters:
+          type: "object"
+          properties:
+            id:
+              type: "string"
+              description: "Link id from current page (integer) or fully qualified URL (string). Default is -1 (most recent page)"
+            cursor:
+              type: "integer"
+              description: "Page cursor to operate on"
+            loc:
+              type: "integer"
+              description: "Starting line number"
+            num_lines:
+              type: "integer"
+              description: "Number of lines to display"
+          required: []
+
+  # --- browser.find ---
+  - class_name: "verl_rl.tools.browser_find_tool.BrowserFindTool"
+    config:
+      type: native
+      # Uses the same search service for find operations
+      search_service_url: "http://127.0.0.1:8090"
+      timeout: 10
+    tool_schema:
+      type: "function"
+      function:
+        name: "browser.find"
+        description: >
+          Finds exact matches of a pattern in the current page or a specified page by cursor.
+        parameters:
+          type: "object"
+          properties:
+            pattern:
+              type: "string"
+              description: "The exact text pattern to search for"
+            cursor:
+              type: "integer"
+              description: "Page cursor to search in"
+          required: ["pattern"]
+
+  # NOTE: No research_reward tool here. The SFT model was never trained to call
+  # such a tool. Instead, the model uses <answer>...</answer> tags natively, and
+  # the reward is computed trajectory-level by verl's reward manager using the
+  # custom_reward_function configured in the GRPO YAML.
