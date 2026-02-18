@@ -40,8 +40,17 @@ def extract_answer(text: str) -> Optional[str]:
     return None
 
 
+def strip_boxed(text: str) -> str:
+    """Strip \\boxed{...} wrapper from ground truth answers."""
+    match = re.match(r"^\\boxed\{(.*)\}$", text.strip(), re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text
+
+
 def normalize_answer(text: str) -> str:
     """Normalize text for comparison."""
+    text = strip_boxed(text)
     text = text.lower().strip()
     text = re.sub(r"\b(a|an|the)\b", " ", text)
     text = re.sub(r"[^\w\s]", "", text)
@@ -75,17 +84,23 @@ def compute_score(
         **kwargs: Additional keyword arguments (ignored)
 
     Returns:
-        Float reward (0.0 or 1.0)
+        Float reward:
+          - 1.0 for correct answer
+          - 0.1 for submitting any answer (format reward, encourages answer submission)
+          - 0.0 for no answer submitted (model exhausted token budget on tool calls)
     """
     answer = extract_answer(solution_str)
     if answer is None:
+        # No answer submitted — zero reward.
+        # This is the cold-start problem: the model must learn to stop
+        # researching and submit an answer within the token budget.
         return 0.0
 
     pred_norm = normalize_answer(answer)
     gt_norm = normalize_answer(ground_truth)
 
     if not pred_norm or not gt_norm:
-        return 0.0
+        return 0.1  # Submitted but empty/unparseable — small format reward
 
     # Exact match
     if pred_norm == gt_norm:
@@ -95,4 +110,5 @@ def compute_score(
     if gt_norm in pred_norm or pred_norm in gt_norm:
         return 1.0
 
-    return 0.0
+    # Wrong answer — still give format reward for submitting
+    return 0.1

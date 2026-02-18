@@ -60,6 +60,7 @@
   - [Example 2: GAIA with Serper API (No Local Search Needed)](#example-2-gaia-with-serper-api-no-local-search-needed)
   - [Evaluation](#evaluation)
   - [Quick Commands](#quick-commands)
+- [🔧 RL Training (Multi-Turn GRPO)](#-rl-training-multi-turn-grpo)
 - [🤝 Core Contributors](#-core-contributors)
 - [🎓 Advisors](#-advisors)
 - [🙏 Acknowledgements](#-acknowledgements)
@@ -247,6 +248,100 @@ For script parameter explanation, refer to [parameter.md](assets/docs/parameter.
 ```bash
 python eval.py --input_dir [INPUT_DIR]
 ```
+## 🔧 RL Training (Multi-Turn GRPO)
+
+We provide a multi-turn GRPO training pipeline built on [verl](https://github.com/volcengine/verl) to further improve the SFT-trained model via reinforcement learning with tool-integrated rollouts. During training, the model performs live multi-turn tool calling (search, open, find) against the BM25 search service, and receives reward based on answer correctness.
+
+For implementation details and debug logs, see:
+- [docs/02162026_multiturn_rl_implementation.md](docs/02162026_multiturn_rl_implementation.md) — initial implementation
+- [docs/02172026_chat_template_debug.md](docs/02172026_chat_template_debug.md) — chat template fix (Nemotron XML vs Hermes JSON)
+- [docs/02182026_training_pipeline_debug.md](docs/02182026_training_pipeline_debug.md) — OOM fix and reward signal
+
+### Key Design Decisions
+
+- **Custom tool call parser**: The Nemotron model uses XML-style tool calls (`<function=name><parameter=key>value</parameter></function>`) while verl's built-in parser expects JSON. We register a custom `NemotronToolParser` without modifying verl (see `verl_rl/parsers/nemotron_tool_parser.py`).
+- **bf16 master weights**: The 30B MoE model in fp32 exceeds A100-80GB memory during the Adam optimizer step. Using `model_dtype=bf16` reduces peak memory from ~73GB to ~39GB per GPU.
+- **Format reward**: The SFT model rarely submits `<answer>` tags during initial RL rollouts, leading to zero reward signal. A format reward (0.1 for submitting any answer, 1.0 for correct) bootstraps the learning process.
+
+### Initial Validation Results (SFT Model, Before RL)
+
+| Metric | Value |
+|--------|-------|
+| Accuracy (exact match) | 0.20% |
+| Avg. tool-calling turns | 7.9 |
+| Turn range | 2–12 |
+
+### RL Dependencies
+
+In addition to the base dependencies, RL training requires building several packages from source to avoid CUDA ABI mismatches:
+
+```bash
+# verl framework
+pip install verl==0.7.0
+
+# causal-conv1d (required by mamba-ssm, must build from source)
+cd /tmp && git clone https://github.com/Dao-AILab/causal-conv1d.git
+cd causal-conv1d && TORCH_CUDA_ARCH_LIST="8.0" pip install -e . --no-build-isolation
+
+# mamba-ssm (must build from source)
+cd /tmp && git clone https://github.com/state-spaces/mamba.git
+cd mamba && TORCH_CUDA_ARCH_LIST="8.0" pip install -e . --no-build-isolation
+
+# flash-attn
+pip install flash-attn --no-build-isolation
+```
+
+Set `TORCH_CUDA_ARCH_LIST` to match your GPU (8.0 = A100, 9.0 = H100/H200).
+
+### Apply Required Monkey Patches
+
+The NemotronH model requires two **monkey patches** that replace files in installed packages. These must be applied before training:
+
+```bash
+# 1. Patch NemotronH model in HuggingFace cache to enable FlashAttention2
+#    The upstream model code implements FlashAttention2 but is missing the
+#    _supports_flash_attn_2 = True flag, causing O(n^2) eager attention fallback.
+cp verl_rl/patches/modeling_nemotron_h.py \
+   ~/.cache/huggingface/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py
+
+# 2. Patch mamba-ssm __init__.py in site-packages to handle CUDA ABI mismatches
+#    Wraps CUDA extension imports in try/except so model config loading doesn't crash.
+MAMBA_INIT=$(python -c "import mamba_ssm; print(mamba_ssm.__file__)")
+cp verl_rl/patches/mamba_ssm__init__.py "$MAMBA_INIT"
+```
+
+**Note:** These patches modify files outside this repo (`~/.cache/huggingface/` and `site-packages/mamba_ssm/`). They need to be re-applied if you reinstall these packages or clear your HuggingFace cache.
+
+### Run GRPO Training
+
+```bash
+# Step 1: Preprocess SFT data into verl parquet format
+python verl_rl/preprocess_openresearcher.py \
+    --hf_dataset OpenResearcher/OpenResearcher-Dataset \
+    --hf_subset seed_42 \
+    --local_save_dir ~/data/openresearcher
+
+# Step 2: Start the search service
+bash scripts/start_search_service.sh bm25 8090
+
+# Step 3: Launch GRPO training (8 GPUs, TP=4, vLLM backend)
+bash verl_rl/run_grpo_training.sh
+```
+
+The launch script supports environment variable overrides:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `N_GPUS` | 8 | Number of GPUs |
+| `TP_SIZE` | 4 | Tensor parallel size for vLLM rollout |
+| `SEARCH_SERVICE_URL` | `http://127.0.0.1:8090` | Search service endpoint |
+| `EXPERIMENT_NAME` | `grpo_multiturn_<timestamp>` | W&B experiment name |
+
+**Notes:**
+- Use the vLLM backend (`actor_rollout_ref.rollout.name=vllm`) for NemotronH. SGLang has known NCCL deadlock and OOM issues with this model architecture.
+- On A100-80GB, `model_dtype=bf16` is required to fit the optimizer step. H200 (141GB) can use fp32.
+- The reward function is in `verl_rl/reward/openresearcher_reward.py`. Modify it to adjust the correctness/format reward balance.
+
 ## 🤝 Core Contributors
 
 <table>

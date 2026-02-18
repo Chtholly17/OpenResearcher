@@ -89,27 +89,53 @@ def make_verl_record(qid, question, answer, split, idx):
     }
 
 
-def load_from_hf_sft(hf_dataset, hf_subset):
+def load_from_hf_sft(hf_dataset, hf_subset, val_ratio=0.05):
     """Load the OpenResearcher SFT dataset from HuggingFace.
 
     The SFT dataset has full multi-turn trajectories with messages, but for RL
     we only need the (question, answer) pairs as prompts. The RL agent will
     generate its own trajectories through tool interaction.
-    """
-    print(f"Loading SFT dataset: {hf_dataset} (subset: {hf_subset})")
-    ds = datasets.load_dataset(hf_dataset, hf_subset, trust_remote_code=True)
 
-    records = {"train": [], "test": []}
+    If only a 'train' split exists, we split off val_ratio as a test set.
+    """
+    import random
+
+    print(f"Loading SFT dataset: {hf_dataset} (subset: {hf_subset})")
+    ds = datasets.load_dataset(hf_dataset, hf_subset)
+
+    all_records = []
     for split_name in ds:
         split = ds[split_name]
         for item in split:
-            records[split_name].append({
+            all_records.append({
                 "qid": item.get("qid", item.get("query_id", 0)),
                 "question": item["question"],
                 "answer": item["answer"],
             })
 
-    print(f"Loaded {sum(len(v) for v in records.values())} records "
+    # If there's no test split, create one from train
+    if "test" not in ds or len(ds.get("test", [])) == 0:
+        random.seed(42)
+        random.shuffle(all_records)
+        n_test = max(1, int(len(all_records) * val_ratio))
+        records = {
+            "train": all_records[n_test:],
+            "test": all_records[:n_test],
+        }
+        print(f"No test split found. Split {len(all_records)} records into "
+              f"train: {len(records['train'])}, test: {len(records['test'])}")
+    else:
+        records = {"train": [], "test": []}
+        for split_name in ds:
+            split = ds[split_name]
+            for item in split:
+                records[split_name].append({
+                    "qid": item.get("qid", item.get("query_id", 0)),
+                    "question": item["question"],
+                    "answer": item["answer"],
+                })
+
+    print(f"Total: {sum(len(v) for v in records.values())} records "
           f"({', '.join(f'{k}: {len(v)}' for k, v in records.items())})")
     return records
 

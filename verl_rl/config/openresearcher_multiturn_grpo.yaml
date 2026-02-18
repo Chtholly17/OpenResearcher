@@ -1,6 +1,6 @@
 hydra:
   searchpath:
-    - file://verl/trainer/config
+    - pkg://verl.trainer.config
 
 defaults:
   - ppo_trainer
@@ -19,25 +19,21 @@ data:
   return_raw_chat: True
 
 # ---- Reward ----
-reward:
-  # Use our custom reward function instead of verl's default_compute_score,
-  # because our data_source "OpenResearcher/OpenResearcher" is not in verl's
-  # built-in dispatch table.
-  custom_reward_function:
-    path: verl_rl/reward/openresearcher_reward.py
-    name: compute_score
+# custom_reward_function is a top-level key in verl's ppo_trainer config,
+# NOT nested under "reward". Our data_source "OpenResearcher/OpenResearcher"
+# is not in verl's built-in dispatch table, so we must provide our own.
+custom_reward_function:
+  path: verl_rl/reward/openresearcher_reward.py
+  name: compute_score
 
 # ---- Actor / Rollout / Reference ----
 actor_rollout_ref:
   hybrid_engine: True
   model:
     path: OpenResearcher/OpenResearcher-30B-A3B
+    trust_remote_code: True
     enable_gradient_checkpointing: True
   actor:
-    # LoRA for memory efficiency on 30B model
-    use_lora: True
-    lora_rank: 64
-    lora_alpha: 64
     optim:
       lr: 1e-6
       weight_decay: 0.01
@@ -49,15 +45,15 @@ actor_rollout_ref:
   ref:
     log_prob_micro_batch_size_per_gpu: 2
   rollout:
-    name: sglang
+    name: vllm
     temperature: 1.0
     top_p: 0.95
-    stop_token_ids: []
     # Multi-turn configuration
     multi_turn:
       enable: True
       # Max number of assistant generation turns (search->open->find->... cycles)
-      max_assistant_turns: 30
+      # Keep moderate to leave token budget for answer submission.
+      max_assistant_turns: 15
       # Max user/interaction turns (for interaction-based feedback)
       max_user_turns: 5
       # Max parallel tool calls per turn
@@ -66,15 +62,16 @@ actor_rollout_ref:
       max_tool_response_length: 2048
       # Truncate from the middle to keep both start and end of results
       tool_response_truncate_side: middle
-      # Tool call format: hermes uses <tool_call>...</tool_call> tags,
-      # which matches the OpenResearcher model's native format
-      format: hermes
+      # Tool call format: nemotron uses <tool_call><function=...><parameter=...>
+      # XML tags, which matches the Nemotron chat template's native format.
+      # The built-in "hermes" parser expects JSON inside <tool_call> tags and
+      # silently fails on this model. Our custom parser is registered via
+      # verl_rl.parsers.nemotron_tool_parser.
+      format: nemotron
       # Tool config pointing to our browser tools
       tool_config_path: ./config/tool_config/openresearcher_tool_config.yaml
       # Interaction config for trajectory-level feedback
       interaction_config_path: ./config/interaction_config/openresearcher_interaction_config.yaml
-    # Server mode for SGLang inference server
-    sglang_rollout_mode: server
     server:
       timeout: 120
       max_attempts: 3

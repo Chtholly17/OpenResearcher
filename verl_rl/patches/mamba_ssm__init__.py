@@ -1,0 +1,17 @@
+__version__ = "2.3.0"
+
+# Wrap imports in try/except to handle CUDA ABI mismatches gracefully.
+# When mamba-ssm is compiled against a different torch version, the CUDA
+# extensions fail to load with undefined symbol errors. This allows
+# transformers to still load the model config without crashing.
+try:
+    from mamba_ssm.ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn
+    from mamba_ssm.modules.mamba_simple import Mamba
+    from mamba_ssm.modules.mamba2 import Mamba2
+    from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
+except ImportError:
+    selective_scan_fn = None
+    mamba_inner_fn = None
+    Mamba = None
+    Mamba2 = None
+    MambaLMHeadModel = None

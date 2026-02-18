@@ -41,8 +41,17 @@ def extract_answer(content: str) -> Optional[str]:
     return None
 
 
+def strip_boxed(text: str) -> str:
+    """Strip \\boxed{...} wrapper from ground truth answers."""
+    match = re.match(r"^\\boxed\{(.*)\}$", text.strip(), re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text
+
+
 def normalize_answer(text: str) -> str:
     """Normalize answer for comparison."""
+    text = strip_boxed(text)
     text = text.lower().strip()
     text = re.sub(r"\b(a|an|the)\b", " ", text)
     text = re.sub(r"[^\w\s]", "", text)
