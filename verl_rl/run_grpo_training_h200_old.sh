@@ -21,6 +21,13 @@
 set -x
 ulimit -n 65535
 
+# ---- TF32 API consistency (avoid "TF32 API mixing" errors with vLLM/FSDP) ----
+# If TF32 errors persist, try: rm -rf ~/.cache/vllm/torch_compile_cache
+unset TORCH_ALLOW_TF32_CUBLAS_OVERRIDE
+unset NVIDIA_TF32_OVERRIDE
+unset NCCL_TF32_OVERRIDE
+export TORCH_FP32_PRECISION=tf32
+
 # ---- Configuration ----
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
@@ -33,8 +40,8 @@ NNODES="${NNODES:-1}"
 TP_SIZE="${TP_SIZE:-4}"
 
 # Data paths
-TRAIN_DATA="${TRAIN_DATA:-$HOME/data/openresearcher/train.parquet}"
-VAL_DATA="${VAL_DATA:-$HOME/data/openresearcher/test.parquet}"
+TRAIN_DATA="/fsx-shared/juncheng/data/openresearcher/train.parquet"
+VAL_DATA="/fsx-shared/juncheng/data/openresearcher/test.parquet"
 
 # Search service URL (must be running)
 SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://127.0.0.1:8090}"
@@ -88,8 +95,9 @@ echo "Experiment:     $EXPERIMENT_NAME"
 echo "=========================================="
 
 # ---- Launch training ----
-# Add project dir to PYTHONPATH so Ray workers can import verl_rl tools/reward
-export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
+# Add torch_hooks first (TF32 consistency via sitecustomize.py), then project dir for verl_rl
+export PYTHONPATH="$PROJECT_DIR/verl_rl/torch_hooks:$PROJECT_DIR:${PYTHONPATH:-}"
+export TORCH_HOOKS_VERBOSE=1
 
 # Disable Ray's OOM killer (false positive with 1TB+ RAM machines)
 export RAY_memory_monitor_refresh_ms=0
@@ -97,16 +105,22 @@ export RAY_memory_monitor_refresh_ms=0
 # Help PyTorch manage fragmented GPU memory (avoids OOM on the 30B MoE model)
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 
-# Working directory must be the verl root for hydra config resolution
-cd "$VERL_DIR"
+# Run from PROJECT_DIR so Python uses verl from venv (site-packages), not the
+# cloned verl at VERL_DIR. When cd'd into VERL_DIR, sys.path[0]=cwd would load
+# the local verl package instead of the venv's installed version.
+cd "$PROJECT_DIR"
 
-python3 -m verl.trainer.main_ppo \
+# Use venv python if available (ensures correct verl from site-packages)
+PYTHON="${PROJECT_DIR}/.venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON=python3
+
+"$PYTHON" -m verl.trainer.main_ppo \
     --config-path="$CONFIG_PATH" \
     --config-name='openresearcher_multiturn_grpo' \
     algorithm.adv_estimator=grpo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA" \
-    data.train_batch_size=4 \
+    data.train_batch_size=8 \
     data.max_prompt_length=2048 \
     data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
@@ -115,8 +129,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.path=OpenResearcher/OpenResearcher-30B-A3B \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.actor.ppo_mini_batch_size=4 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=8 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \

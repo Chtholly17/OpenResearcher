@@ -295,7 +295,7 @@ Set `TORCH_CUDA_ARCH_LIST` to match your GPU (8.0 = A100, 9.0 = H100/H200).
 
 ### Apply Required Monkey Patches
 
-The NemotronH model requires two **monkey patches** that replace files in installed packages. These must be applied before training:
+The NemotronH model requires three **monkey patches** that replace or modify files in installed packages. These must be applied before training:
 
 ```bash
 # 1. Patch NemotronH model in HuggingFace cache to enable FlashAttention2
@@ -308,9 +308,16 @@ cp verl_rl/patches/modeling_nemotron_h.py \
 #    Wraps CUDA extension imports in try/except so model config loading doesn't crash.
 MAMBA_INIT=$(python -c "import mamba_ssm; print(mamba_ssm.__file__)")
 cp verl_rl/patches/mamba_ssm__init__.py "$MAMBA_INIT"
+
+# 3. Patch verl fsdp_workers.py for configuration_nemotron_h import
+#    Nemotron uses "from configuration_nemotron_h import ..." (absolute import).
+#    The config module lives in the model repo, not as a pip package. This adds the
+#    model dir to sys.path before loading. If permission denied:
+#    sudo chmod 666 $(python -c "import verl.workers.fsdp_workers; print(verl.workers.fsdp_workers.__file__)")
+python verl_rl/patches/apply_fsdp_nemotron_fix.py
 ```
 
-**Note:** These patches modify files outside this repo (`~/.cache/huggingface/` and `site-packages/mamba_ssm/`). They need to be re-applied if you reinstall these packages or clear your HuggingFace cache.
+**Note:** These patches modify files outside this repo (`~/.cache/huggingface/`, `site-packages/mamba_ssm/`, and `site-packages/verl/`). They need to be re-applied if you reinstall these packages or clear your HuggingFace cache.
 
 ### Run GRPO Training
 
@@ -341,6 +348,8 @@ The launch script supports environment variable overrides:
 - Use the vLLM backend (`actor_rollout_ref.rollout.name=vllm`) for NemotronH. SGLang has known NCCL deadlock and OOM issues with this model architecture.
 - On A100-80GB, `model_dtype=bf16` is required to fit the optimizer step. H200 (141GB) can use fp32.
 - The reward function is in `verl_rl/reward/openresearcher_reward.py`. Modify it to adjust the correctness/format reward balance.
+
+**TF32 API consistency:** The launch script uses `verl_rl/torch_hooks/sitecustomize.py` to unify TF32 settings and avoid "TF32 API mixing" errors between vLLM and FSDP. It unsets `TORCH_ALLOW_TF32_CUBLAS_OVERRIDE`, `NVIDIA_TF32_OVERRIDE`, `NCCL_TF32_OVERRIDE` and sets `TORCH_FP32_PRECISION=tf32`. If TF32 errors persist, try `rm -rf ~/.cache/vllm/torch_compile_cache`. For debugging, set `TORCH_HOOKS_VERBOSE=1`.
 
 ## 🤝 Core Contributors
 
