@@ -295,7 +295,7 @@ Set `TORCH_CUDA_ARCH_LIST` to match your GPU (8.0 = A100, 9.0 = H100/H200).
 
 ### Apply Required Monkey Patches
 
-The NemotronH model requires two **monkey patches** that replace files in installed packages. These must be applied before training:
+The training pipeline requires three **monkey patches** that replace files in installed packages. These must be applied before training:
 
 ```bash
 # 1. Patch NemotronH model in HuggingFace cache to enable FlashAttention2
@@ -308,9 +308,16 @@ cp verl_rl/patches/modeling_nemotron_h.py \
 #    Wraps CUDA extension imports in try/except so model config loading doesn't crash.
 MAMBA_INIT=$(python -c "import mamba_ssm; print(mamba_ssm.__file__)")
 cp verl_rl/patches/mamba_ssm__init__.py "$MAMBA_INIT"
+
+# 3. Patch verl tool schemas to preserve extra fields (default, array types)
+#    Without this, verl's Pydantic validation strips "default" values and rejects
+#    array types like ["integer", "string"] from tool definitions, causing the RL
+#    prompt to differ from the SFT training prompt.
+cp verl_rl/patches/verl_tool_schemas.py \
+   "$(python -c "import verl; import os; print(os.path.dirname(verl.__file__))")/tools/schemas.py"
 ```
 
-**Note:** These patches modify files outside this repo (`~/.cache/huggingface/` and `site-packages/mamba_ssm/`). They need to be re-applied if you reinstall these packages or clear your HuggingFace cache.
+**Note:** These patches modify files outside this repo (`~/.cache/huggingface/`, `site-packages/mamba_ssm/`, and `site-packages/verl/`). They need to be re-applied if you reinstall these packages or clear your HuggingFace cache.
 
 ### Run GRPO Training
 

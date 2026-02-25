@@ -33,8 +33,8 @@ NNODES="${NNODES:-1}"
 TP_SIZE="${TP_SIZE:-4}"
 
 # Data paths
-TRAIN_DATA="${TRAIN_DATA:-$HOME/data/openresearcher/train.parquet}"
-VAL_DATA="${VAL_DATA:-$HOME/data/openresearcher/test.parquet}"
+TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/train.parquet}"
+VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/test.parquet}"
 
 # Search service URL (must be running)
 SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://127.0.0.1:8090}"
@@ -87,6 +87,33 @@ echo "Search service: $SEARCH_SERVICE_URL"
 echo "Experiment:     $EXPERIMENT_NAME"
 echo "=========================================="
 
+# ---- Apply monkey patches ----
+# Patch 1: NemotronH flash attention (only if model is in HF cache)
+HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
+NEMOTRON_GLOB="$HF_CACHE_DIR/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py"
+for f in $NEMOTRON_GLOB; do
+    if [ -f "$f" ]; then
+        if ! grep -q '_supports_flash_attn_2' "$f"; then
+            echo "Applying NemotronH flash attention patch to: $f"
+            cp "$PROJECT_DIR/verl_rl/patches/modeling_nemotron_h.py" "$f"
+        fi
+    fi
+done
+
+# Patch 2: mamba-ssm graceful import
+MAMBA_INIT=$(python3 -c "import mamba_ssm; print(mamba_ssm.__file__)" 2>/dev/null)
+if [ -n "$MAMBA_INIT" ] && ! grep -q 'except ImportError' "$MAMBA_INIT"; then
+    echo "Applying mamba-ssm graceful import patch to: $MAMBA_INIT"
+    cp "$PROJECT_DIR/verl_rl/patches/mamba_ssm__init__.py" "$MAMBA_INIT"
+fi
+
+# Patch 3: verl tool schemas (extra="allow" + array types)
+VERL_SCHEMAS=$(python3 -c "import verl.tools.schemas; print(verl.tools.schemas.__file__)" 2>/dev/null)
+if [ -n "$VERL_SCHEMAS" ] && ! grep -q 'extra="allow"' "$VERL_SCHEMAS"; then
+    echo "Applying verl tool schemas patch to: $VERL_SCHEMAS"
+    cp "$PROJECT_DIR/verl_rl/patches/verl_tool_schemas.py" "$VERL_SCHEMAS"
+fi
+
 # ---- Launch training ----
 # Add project dir to PYTHONPATH so Ray workers can import verl_rl tools/reward
 export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
@@ -96,6 +123,12 @@ export RAY_memory_monitor_refresh_ms=0
 
 # Help PyTorch manage fragmented GPU memory (avoids OOM on the 30B MoE model)
 export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+# Enable reward function debug logging (first 20 samples)
+export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug.jsonl}"
+
+# HF cache — use writable home directory (model already cached here)
+export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
 # Working directory must be the verl root for hydra config resolution
 cd "$VERL_DIR"
@@ -107,8 +140,8 @@ python3 -m verl.trainer.main_ppo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA" \
     data.train_batch_size=4 \
-    data.max_prompt_length=2048 \
-    data.max_response_length=2048 \
+    data.max_prompt_length=4096 \
+    data.max_response_length=126976 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
@@ -125,12 +158,16 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bf16 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
-    actor_rollout_ref.rollout.max_model_len=8192 \
-    actor_rollout_ref.rollout.n=2 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
+    actor_rollout_ref.rollout.max_model_len=131072 \
+    actor_rollout_ref.rollout.n=8 \
+    actor_rollout_ref.rollout.val_kwargs.n=2 \
     actor_rollout_ref.rollout.max_num_seqs=256 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
+    actor_rollout_ref.rollout.multi_turn.max_assistant_turns=500 \
+    actor_rollout_ref.rollout.multi_turn.max_user_turns=500 \
+    actor_rollout_ref.rollout.multi_turn.max_tool_response_length=1024 \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG" \
     actor_rollout_ref.rollout.multi_turn.interaction_config_path="$INTERACTION_CONFIG" \
     custom_reward_function.path="$REWARD_MODULE" \
@@ -142,6 +179,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name="$EXPERIMENT_NAME" \
     trainer.n_gpus_per_node=$N_GPUS \
     trainer.nnodes=$NNODES \
+    trainer.total_epochs=2 \
     trainer.val_before_train=True \
+    trainer.test_freq=35 \
     trainer.logger='["console","wandb"]' \
     "$@"

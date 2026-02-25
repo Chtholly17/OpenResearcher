@@ -17,6 +17,8 @@ from verl.tools.base_tool import BaseTool
 from verl.tools.schemas import OpenAIFunctionToolSchema, ToolResponse
 from verl.utils.rollout_trace import rollout_trace_op
 
+from verl_rl.tools._session_state import get_session, clear_session, increment_tool_calls, is_budget_exhausted, should_warn, BUDGET_EXHAUSTED_MSG, BUDGET_WARNING_MSG
+
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
@@ -50,6 +52,13 @@ class BrowserSearchTool(BaseTool):
         if not query:
             return ToolResponse(text="Error: empty search query"), 0.0, {}
 
+        # Use trajectory-level request_id for budget tracking (not per-call instance_id)
+        agent_data = kwargs.get("agent_data")
+        traj_id = getattr(agent_data, "request_id", instance_id) if agent_data else instance_id
+        increment_tool_calls(traj_id)
+        if is_budget_exhausted(traj_id):
+            return ToolResponse(text=BUDGET_EXHAUSTED_MSG), 0.0, {"budget_exhausted": True}
+
         # Track usage
         self._instance_dict[instance_id]["search_count"] += 1
         self._instance_dict[instance_id]["queries"].append(query)
@@ -71,15 +80,18 @@ class BrowserSearchTool(BaseTool):
                         )
                     result = await resp.json()
 
-            # Format results similar to OpenResearcher's browser output
-            result_text = self._format_search_results(query, result, topn)
+            # Format results and store URL mappings for browser.open
+            result_text = self._format_search_results(query, result, topn, traj_id)
+            # Append soft budget warning if nearing limit
+            if should_warn(traj_id):
+                result_text += BUDGET_WARNING_MSG
             return ToolResponse(text=result_text), 0.0, {"search_count": self._instance_dict[instance_id]["search_count"]}
 
         except Exception as e:
             logger.warning(f"Search failed for query '{query}': {e}")
             return ToolResponse(text=f"Search failed: {e}"), 0.0, {"error": True}
 
-    def _format_search_results(self, query: str, result: Any, topn: int) -> str:
+    def _format_search_results(self, query: str, result: Any, topn: int, instance_id: str) -> str:
         """Format search results into text that the model expects."""
         if isinstance(result, str):
             return result
@@ -87,12 +99,20 @@ class BrowserSearchTool(BaseTool):
             # The search service may return different formats
             if "results" in result:
                 results = result["results"][:topn]
+                session = get_session(instance_id)
+                # Store URL mappings so browser.open can resolve integer IDs
+                session["search_results"] = {}
                 lines = [f"Search results for: {query}\n"]
                 for i, r in enumerate(results, 1):
                     title = r.get("title", "No title")
                     url = r.get("url", r.get("docid", ""))
-                    snippet = r.get("snippet", r.get("text", ""))[:300]
+                    snippet = r.get("summary", r.get("snippet", r.get("text", "")))[:300]
                     lines.append(f"[{i}] {title}\n    URL: {url}\n    {snippet}\n")
+                    # Map both 0-indexed and 1-indexed IDs to URLs
+                    session["search_results"][i] = url
+                    session["search_results"][i - 1] = url
+                    session["all_results"][i] = url
+                    session["all_results"][i - 1] = url
                 return "\n".join(lines)
             # Direct text response
             if "text" in result:
@@ -105,3 +125,4 @@ class BrowserSearchTool(BaseTool):
     async def release(self, instance_id: str, **kwargs) -> None:
         if instance_id in self._instance_dict:
             del self._instance_dict[instance_id]
+        clear_session(instance_id)

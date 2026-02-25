@@ -26,6 +26,8 @@ from verl.tools.base_tool import BaseTool
 from verl.tools.schemas import OpenAIFunctionToolSchema, ToolResponse
 from verl.utils.rollout_trace import rollout_trace_op
 
+from verl_rl.tools._session_state import get_session, increment_tool_calls, is_budget_exhausted, should_warn, BUDGET_EXHAUSTED_MSG, BUDGET_WARNING_MSG
+
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
@@ -54,24 +56,32 @@ class BrowserOpenTool(BaseTool):
         self, instance_id: str, parameters: dict[str, Any], **kwargs
     ) -> tuple[ToolResponse, float, dict]:
         doc_id = parameters.get("id", -1)
-        cursor = parameters.get("cursor", -1)
-        loc = parameters.get("loc", -1)
         num_lines = parameters.get("num_lines", self.default_num_lines)
+
+        # Use trajectory-level request_id for budget tracking (not per-call instance_id)
+        agent_data = kwargs.get("agent_data")
+        traj_id = getattr(agent_data, "request_id", instance_id) if agent_data else instance_id
+        increment_tool_calls(traj_id)
+        if is_budget_exhausted(traj_id):
+            return ToolResponse(text=BUDGET_EXHAUSTED_MSG), 0.0, {"budget_exhausted": True}
 
         self._instance_dict[instance_id]["open_count"] += 1
 
+        # Resolve integer IDs to URLs using session state from browser.search
+        url = str(doc_id)
+        if isinstance(doc_id, int) or (isinstance(doc_id, str) and doc_id.lstrip("-").isdigit()):
+            int_id = int(doc_id)
+            session_state = get_session(traj_id)
+            # Try most recent search results first, then all historical results
+            resolved = session_state["search_results"].get(int_id) or session_state["all_results"].get(int_id)
+            if resolved:
+                url = resolved
+
         try:
             async with aiohttp.ClientSession() as session:
-                payload = {
-                    "action": "open",
-                    "instance_id": instance_id,
-                    "id": doc_id,
-                    "cursor": cursor,
-                    "loc": loc,
-                    "num_lines": num_lines,
-                }
+                payload = {"url": url}
                 async with session.post(
-                    f"{self.search_service_url}/open",
+                    f"{self.search_service_url}/get_content",
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=self.timeout),
                 ) as resp:
@@ -84,14 +94,22 @@ class BrowserOpenTool(BaseTool):
                         )
                     result = await resp.json()
 
-            # Extract text content from response
+            # Format: {"title": ..., "content": ...}
             if isinstance(result, dict):
-                result_text = result.get("text", result.get("content", json.dumps(result, ensure_ascii=False)))
+                title = result.get("title", "")
+                content = result.get("content", result.get("text", ""))
+                # Truncate to num_lines worth of content
+                lines = content.split("\n")
+                if len(lines) > num_lines:
+                    lines = lines[:num_lines]
+                result_text = f"Title: {title}\n\n" + "\n".join(lines)
             elif isinstance(result, str):
                 result_text = result
             else:
                 result_text = json.dumps(result, ensure_ascii=False)
 
+            if should_warn(traj_id):
+                result_text += BUDGET_WARNING_MSG
             return (
                 ToolResponse(text=result_text),
                 0.0,

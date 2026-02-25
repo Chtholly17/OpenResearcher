@@ -98,16 +98,6 @@ class NemotronToolParser(ToolParser):
             None, self.tokenizer.decode, responses_ids
         )
 
-        # DEBUG: print to ensure visibility in Ray worker logs
-        import sys
-        print(
-            f"[NemotronParser] n_tokens={len(responses_ids)}, "
-            f"has_start={self.tool_call_start_token in text}, "
-            f"has_end={self.tool_call_end_token in text}, "
-            f"text_preview={repr(text[:500])}",
-            file=sys.stderr, flush=True,
-        )
-
         if self.tool_call_start_token not in text or self.tool_call_end_token not in text:
             return text, []
 
@@ -118,11 +108,8 @@ class NemotronToolParser(ToolParser):
                 fc = parse_nemotron_tool_call(match)
                 if fc is not None:
                     function_calls.append(fc)
-                    print(f"[NemotronParser] Parsed tool call: {fc.name}({fc.arguments})", file=sys.stderr, flush=True)
             except Exception as e:
                 logger.error(f"Failed to parse Nemotron tool call: {e}")
-
-        print(f"[NemotronParser] Found {len(function_calls)} tool calls", file=sys.stderr, flush=True)
 
         # Remaining text with tool call blocks removed
         content = _TOOL_CALL_REGEX.sub("", text)
