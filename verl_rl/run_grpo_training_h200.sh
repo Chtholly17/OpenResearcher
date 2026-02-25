@@ -1,32 +1,24 @@
 #!/bin/bash
-# Launch multi-turn GRPO training for OpenResearcher
+# Launch multi-turn GRPO training for OpenResearcher — H200 (141GB) optimized
 #
-# Prerequisites:
-#   1. Search service running: bash scripts/start_search_service.sh bm25 8090
-#   2. Data preprocessed: python verl_rl/preprocess_openresearcher.py \
-#        --hf_dataset OpenResearcher/OpenResearcher-Dataset --hf_subset seed_42 \
-#        --local_save_dir ~/data/openresearcher
-#   3. verl installed: pip install verl (or cloned at ../verl)
+# Key differences from A100 version:
+#   - TP=2 → 4 vLLM server groups (2x rollout parallelism)
+#   - 64K context (vs 16K on A100) — fits 30B lm_head logits in 141GB
+#   - No FSDP param/optimizer offload — everything fits on-GPU
+#   - Full 3-policy GRPO with KL loss (ref policy fits in memory)
+#   - Larger micro-batches for faster forward/backward
+#   - train_batch_size=8 for better gradient signal
 #
 # Usage:
-#   # Default: 8 GPUs, TP=4 for rollout
-#   bash verl_rl/run_grpo_training.sh
+#   bash verl_rl/run_grpo_training_h200.sh
 #
-#   # Custom GPU count
-#   N_GPUS=4 bash verl_rl/run_grpo_training.sh
-#
-#   # Override any config via command line
-#   bash verl_rl/run_grpo_training.sh trainer.total_epochs=3 algorithm.grpo_n_generations=8
+#   # Override defaults:
+#   TRAIN_DATA=data/train_curriculum_1k.parquet \
+#   EXPERIMENT_NAME=grpo_h200_1k \
+#   bash verl_rl/run_grpo_training_h200.sh
 
 set -x
 ulimit -n 65535
-
-# ---- TF32 API consistency (avoid "TF32 API mixing" errors with vLLM/FSDP) ----
-# If TF32 errors persist, try: rm -rf ~/.cache/vllm/torch_compile_cache
-unset TORCH_ALLOW_TF32_CUBLAS_OVERRIDE
-unset NVIDIA_TF32_OVERRIDE
-unset NCCL_TF32_OVERRIDE
-export TORCH_FP32_PRECISION=tf32
 
 # ---- Configuration ----
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,17 +28,12 @@ CONFIG_PATH="$PROJECT_DIR/verl_rl/config"
 N_GPUS="${N_GPUS:-8}"
 NNODES="${NNODES:-1}"
 
-# Model: 30B-A3B MoE with TP=4 for rollout (2 server groups)
-TP_SIZE="${TP_SIZE:-4}"
+# TP=2: 30B-A3B fits in 2×141GB → 4 server groups (vs 2 on A100 with TP=4)
+TP_SIZE="${TP_SIZE:-2}"
 
 # Data paths
-<<<<<<< HEAD:verl_rl/run_grpo_training_h200_old.sh
-TRAIN_DATA="/fsx-shared/juncheng/data/openresearcher/train.parquet"
-VAL_DATA="/fsx-shared/juncheng/data/openresearcher/test.parquet"
-=======
-TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/train.parquet}"
-VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/test.parquet}"
->>>>>>> 807a350fa3f2bf7a5dfb60ce1edba9e267089d41:verl_rl/run_grpo_training.sh
+TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/train_curriculum_500.parquet}"
+VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/test_20.parquet}"
 
 # Search service URL (must be running)
 SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://127.0.0.1:8090}"
@@ -58,7 +45,7 @@ REWARD_MODULE="$PROJECT_DIR/verl_rl/reward/openresearcher_reward.py"
 
 # Experiment naming
 TIMESTAMP=$(date '+%m%d-%H%M')
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_multiturn_${TIMESTAMP}}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_h200_${TIMESTAMP}}"
 
 # ---- Download data if not present ----
 HF_DATA_REPO="PahaII/openresearcher-training-data"
@@ -97,7 +84,7 @@ if [ ! -f "$TRAIN_DATA" ]; then
     echo "Available files in $DATA_DIR:"
     ls -1 "$DATA_DIR"/*.parquet 2>/dev/null || echo "  (none)"
     echo "Set TRAIN_DATA to one of the above, e.g.:"
-    echo "  TRAIN_DATA=$DATA_DIR/train_curriculum_500.parquet bash verl_rl/run_grpo_training.sh"
+    echo "  TRAIN_DATA=$DATA_DIR/train_curriculum_500.parquet bash verl_rl/run_grpo_training_h200.sh"
     exit 1
 fi
 
@@ -120,7 +107,7 @@ if ! curl -s --max-time 5 "$SEARCH_SERVICE_URL" > /dev/null 2>&1; then
 fi
 
 echo "=========================================="
-echo "OpenResearcher Multi-Turn GRPO Training"
+echo "OpenResearcher GRPO Training (H200)"
 echo "=========================================="
 echo "Project dir:    $PROJECT_DIR"
 echo "verl dir:       $VERL_DIR"
@@ -161,51 +148,23 @@ if [ -n "$VERL_SCHEMAS" ] && ! grep -q 'extra="allow"' "$VERL_SCHEMAS"; then
 fi
 
 # ---- Launch training ----
-# Add torch_hooks first (TF32 consistency via sitecustomize.py), then project dir for verl_rl
-export PYTHONPATH="$PROJECT_DIR/verl_rl/torch_hooks:$PROJECT_DIR:${PYTHONPATH:-}"
-export TORCH_HOOKS_VERBOSE=1
-
-# Disable Ray's OOM killer (false positive with 1TB+ RAM machines)
+export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
 export RAY_memory_monitor_refresh_ms=0
-
-# Help PyTorch manage fragmented GPU memory (avoids OOM on the 30B MoE model)
 export PYTORCH_ALLOC_CONF=expandable_segments:True
-
-<<<<<<< HEAD:verl_rl/run_grpo_training_h200_old.sh
-# Run from PROJECT_DIR so Python uses verl from venv (site-packages), not the
-# cloned verl at VERL_DIR. When cd'd into VERL_DIR, sys.path[0]=cwd would load
-# the local verl package instead of the venv's installed version.
-cd "$PROJECT_DIR"
-=======
-# Enable reward function debug logging (first 20 samples)
 export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug.jsonl}"
-
-# HF cache — use writable home directory (model already cached here)
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
-# Working directory must be the verl root for hydra config resolution
 cd "$VERL_DIR"
->>>>>>> 807a350fa3f2bf7a5dfb60ce1edba9e267089d41:verl_rl/run_grpo_training.sh
 
-# Use venv python if available (ensures correct verl from site-packages)
-PYTHON="${PROJECT_DIR}/.venv/bin/python"
-[ -x "$PYTHON" ] || PYTHON=python3
-
-"$PYTHON" -m verl.trainer.main_ppo \
+python3 -m verl.trainer.main_ppo \
     --config-path="$CONFIG_PATH" \
     --config-name='openresearcher_multiturn_grpo' \
     algorithm.adv_estimator=grpo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA" \
-<<<<<<< HEAD:verl_rl/run_grpo_training_h200_old.sh
     data.train_batch_size=8 \
-    data.max_prompt_length=2048 \
-    data.max_response_length=2048 \
-=======
-    data.train_batch_size=4 \
     data.max_prompt_length=4096 \
-    data.max_response_length=126976 \
->>>>>>> 807a350fa3f2bf7a5dfb60ce1edba9e267089d41:verl_rl/run_grpo_training.sh
+    data.max_response_length=98304 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
@@ -217,18 +176,18 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
-    actor_rollout_ref.actor.fsdp_config.param_offload=True \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bf16 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
-    actor_rollout_ref.rollout.max_model_len=131072 \
+    actor_rollout_ref.rollout.max_model_len=102400 \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.max_num_seqs=256 \
     actor_rollout_ref.rollout.calculate_log_probs=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=500 \
     actor_rollout_ref.rollout.multi_turn.max_user_turns=500 \
@@ -236,9 +195,8 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG" \
     actor_rollout_ref.rollout.multi_turn.interaction_config_path="$INTERACTION_CONFIG" \
     custom_reward_function.path="$REWARD_MODULE" \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.ref.fsdp_config.param_offload=True \
-    algorithm.rollout_correction.bypass_mode=True \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.ref.fsdp_config.param_offload=False \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
     trainer.project_name='openresearcher_rl' \

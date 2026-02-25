@@ -11,13 +11,15 @@ tools:
       num_workers: 64
       rate_limit: 64
       timeout: 30
+    # Tool schema must match TOOL_CONTENT in data_utils.py exactly so the
+    # Nemotron chat template renders identical tool definitions during RL as
+    # during SFT training.  verl's Pydantic schemas now preserve extra fields
+    # (default, etc.) via ConfigDict(extra="allow").
     tool_schema:
       type: "function"
       function:
         name: "browser.search"
-        description: >
-          Searches for information related to a query and displays top N results.
-          Returns a list of search results with titles, URLs, and summaries.
+        description: "Searches for information related to a query and displays top N results. Returns a list of search results with titles, URLs, and summaries."
         parameters:
           type: "object"
           properties:
@@ -26,7 +28,8 @@ tools:
               description: "The search query string"
             topn:
               type: "integer"
-              description: "Number of results to display (default: 10)"
+              description: "Number of results to display"
+              default: 10
           required: ["query"]
 
   # --- browser.open ---
@@ -41,25 +44,35 @@ tools:
       type: "function"
       function:
         name: "browser.open"
-        description: >
-          Opens a link from the current page or a fully qualified URL.
-          Can scroll to a specific location and display a specific number of lines.
-          Valid link ids are displayed with the formatting: [{id}+.*].
+        description: "Opens a link from the current page or a fully qualified URL. Can scroll to a specific location and display a specific number of lines. Valid link ids are displayed with the formatting: \u3010{id}\u2020.*\u3011."
         parameters:
           type: "object"
           properties:
             id:
-              type: "string"
+              type:
+                - "integer"
+                - "string"
               description: "Link id from current page (integer) or fully qualified URL (string). Default is -1 (most recent page)"
+              default: -1
             cursor:
               type: "integer"
-              description: "Page cursor to operate on"
+              description: "Page cursor to operate on. If not provided, the most recent page is implied"
+              default: -1
             loc:
               type: "integer"
-              description: "Starting line number"
+              description: "Starting line number. If not provided, viewport will be positioned at the beginning or centered on relevant passage"
+              default: -1
             num_lines:
               type: "integer"
               description: "Number of lines to display"
+              default: -1
+            view_source:
+              type: "boolean"
+              description: "Whether to view page source"
+              default: false
+            source:
+              type: "string"
+              description: "The source identifier (e.g., 'web')"
           required: []
 
   # --- browser.find ---
@@ -73,8 +86,7 @@ tools:
       type: "function"
       function:
         name: "browser.find"
-        description: >
-          Finds exact matches of a pattern in the current page or a specified page by cursor.
+        description: "Finds exact matches of a pattern in the current page or a specified page by cursor."
         parameters:
           type: "object"
           properties:
@@ -83,10 +95,27 @@ tools:
               description: "The exact text pattern to search for"
             cursor:
               type: "integer"
-              description: "Page cursor to search in"
+              description: "Page cursor to search in. If not provided, searches in the current page"
+              default: -1
           required: ["pattern"]
 
-  # NOTE: No research_reward tool here. The SFT model was never trained to call
-  # such a tool. Instead, the model uses <answer>...</answer> tags natively, and
-  # the reward is computed trajectory-level by verl's reward manager using the
-  # custom_reward_function configured in the GRPO YAML.
+  # --- submit_answer ---
+  # The SFT model always generates <tool_call> tags and never plain-text <answer>
+  # tags. This tool gives the model a way to submit answers via tool calling.
+  # The tool response injects <answer>...</answer> tags so the reward function
+  # can extract and score the answer.
+  - class_name: "verl_rl.tools.submit_answer_tool.SubmitAnswerTool"
+    config:
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "submit_answer"
+        description: "Submit your final answer to the user's question. Call this tool when you have gathered enough information to provide a confident answer. Your answer should be concise and directly address the question."
+        parameters:
+          type: "object"
+          properties:
+            answer:
+              type: "string"
+              description: "Your final answer to the question"
+          required: ["answer"]

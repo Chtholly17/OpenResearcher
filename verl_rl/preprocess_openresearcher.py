@@ -40,18 +40,29 @@ from data_utils import DEVELOPER_CONTENT, load_dataset_unified
 
 DATA_SOURCE = "OpenResearcher/OpenResearcher"
 
+# Answer submission instructions appended to the SFT system prompt.
+# The SFT model was trained to generate "Exact Answer:" + "Confidence:" after
+# researching, or to call submit_answer (which wraps in <answer> tags).
+# We instruct both approaches so the model uses whatever it's most comfortable with.
+ANSWER_INSTRUCTIONS = """
+
+When you have gathered enough information, provide your final answer. You can either:
+1. Call the submit_answer tool with your answer, OR
+2. Write your answer in this format:
+Exact Answer: [your answer]
+Confidence: [high/medium/low]
+
+You MUST submit an answer before your research budget runs out. Do not end without providing an answer.
+If you cannot find the exact answer, submit your best guess."""
+
 
 def make_verl_record(qid, question, answer, split, idx):
     """Convert a single (question, answer) pair into verl's required parquet format.
 
     Key design decisions:
-    - System prompt: Use the SAME DEVELOPER_CONTENT that the SFT model was trained on,
-      NOT a custom prompt. The RL policy starts from the SFT checkpoint and expects
-      the same system prompt format.
-    - No research_reward tool in tools_kwargs: The SFT model was never trained to call
-      a "research_reward" tool. It uses <answer> tags natively. The trajectory-level
-      reward is computed by verl's reward manager using our custom_reward_function
-      (configured in the YAML), which extracts <answer> tags from the response.
+    - System prompt: Use DEVELOPER_CONTENT from SFT + ANSWER_INSTRUCTIONS that teach
+      the model to submit <answer> tags. The SFT model was never trained with answer
+      tags, so the RL system prompt must add this instruction.
     - Browser tools don't need per-instance create_kwargs since they connect to a
       shared stateful search service. The tools_kwargs are left empty for them.
     - interaction_kwargs enable the interaction handler to give feedback when the
@@ -62,7 +73,7 @@ def make_verl_record(qid, question, answer, split, idx):
         "prompt": [
             {
                 "role": "system",
-                "content": DEVELOPER_CONTENT,
+                "content": DEVELOPER_CONTENT + ANSWER_INSTRUCTIONS,
             },
             {
                 "role": "user",

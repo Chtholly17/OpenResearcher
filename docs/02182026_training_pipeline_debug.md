@@ -126,7 +126,7 @@ Training is running stably on 8× A100-80GB:
 
 ## Required Monkey Patches (External Libraries)
 
-Two files in `verl_rl/patches/` must be copied into installed packages before training. These are **not** runtime patches — they replace files on disk in `~/.cache` and `site-packages`.
+Three files in `verl_rl/patches/` must be copied into installed packages before training. These are **not** runtime patches — they replace files on disk in `~/.cache` and `site-packages`.
 
 1. **`verl_rl/patches/modeling_nemotron_h.py`** → replaces `~/.cache/huggingface/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py`
    - Adds `_supports_flash_attn_2 = True` to the model class (line 1212)
@@ -137,7 +137,34 @@ Two files in `verl_rl/patches/` must be copied into installed packages before tr
    - Wraps CUDA extension imports in `try/except` to handle ABI mismatches
    - Without this, `import mamba_ssm` crashes if compiled against a different torch version
 
+3. **`verl_rl/patches/verl_tool_schemas.py`** → replaces `verl/tools/schemas.py` in the installed verl package
+   - Adds `ConfigDict(extra="allow")` to `OpenAIFunctionPropertySchema` and `OpenAIFunctionParametersSchema` so extra fields like `default` survive Pydantic validation and appear in `model_dump()`
+   - Changes `OpenAIFunctionPropertySchema.type` from `str` to `str | list[str]` to support JSON Schema array types like `["integer", "string"]`
+   - Without this, the Nemotron chat template renders different tool definitions during RL vs SFT (missing `<default>` tags, wrong parameter types), causing prompt distribution shift and degraded model performance
+
 **Not a monkey patch**: The custom `NemotronToolParser` (`verl_rl/parsers/nemotron_tool_parser.py`) registers into verl's plugin registry at runtime via `@ToolParser.register("nemotron")`. It does not modify verl's source code.
+
+## 02/22 Fix: Response Budget & Tool Schema Mismatch
+
+### Root cause of ~0.2% initial validation accuracy
+
+Investigation revealed the model was exhausting its response token budget on tool calls and thinking, never reaching the `<answer>` submission stage:
+
+1. **`max_response_length=2048` was far too short** — In multi-turn mode, this covers ALL response tokens: `<think>` reasoning, tool call XML, tool response text (mask=0), and the final answer. With `enable_thinking=True` (Nemotron default), each assistant turn starts with `<think>\n` consuming ~200+ tokens. After 2-3 tool calls + responses, the budget was exhausted.
+
+2. **Tool schema mismatch** — verl's `OpenAIFunctionPropertySchema` Pydantic model only defined `type: str`, `description`, `enum`. Extra fields like `default` were silently dropped during `model_validate()`. Array types like `["integer", "string"]` failed validation. This caused the Nemotron chat template to render different `<tools>` sections during RL vs SFT training.
+
+### Fixes applied
+
+| File | Change | Before → After |
+|------|--------|----------------|
+| `run_grpo_training.sh` | Response budget | `max_response_length=2048` → `6144` |
+| `run_grpo_training.sh` | Prompt budget | `max_prompt_length=2048` → `4096` |
+| `run_grpo_training.sh` | vLLM context | `max_model_len=8192` → `12288` |
+| `verl/tools/schemas.py` | Preserve extra fields | Added `ConfigDict(extra="allow")`, `type: str \| list[str]` |
+| `openresearcher_tool_config.yaml` | Match SFT tools | Added `default` values, `view_source`/`source` params, array types |
+
+**Verification**: After fixes, `apply_chat_template` produces identical output (950 tokens, 0 diffs) between inference (`TOOL_CONTENT`) and RL (`tool_config_path`).
 
 ## TODO for Next Session
 
@@ -145,8 +172,6 @@ Two files in `verl_rl/patches/` must be copied into installed packages before tr
 
 2. **Remove debug prints** from `verl_rl/parsers/nemotron_tool_parser.py` — they're verbose and no longer needed.
 
-3. **Consider increasing `max_response_length`** — currently 2048, which limits research depth. The model hits the budget cap frequently (`response_length/clip_ratio: 0.25-0.625`). More budget would let it research more before submitting.
+3. **Tune format reward weight** — 0.1 may be too low or too high. If the model learns to always submit garbage answers early (to get 0.1), it won't learn to research. If too low, the signal is too sparse. Monitor behavior.
 
-4. **Tune format reward weight** — 0.1 may be too low or too high. If the model learns to always submit garbage answers early (to get 0.1), it won't learn to research. If too low, the signal is too sparse. Monitor behavior.
-
-5. **Investigate `pg_clipfrac=0.0`** — this means no clipping is happening, which could indicate the KL penalty is too strong or the policy isn't changing. May need to adjust `kl_loss_coef` or `clip_ratio`.
+4. **Investigate `pg_clipfrac=0.0`** — this means no clipping is happening, which could indicate the KL penalty is too strong or the policy isn't changing. May need to adjust `kl_loss_coef` or `clip_ratio`.

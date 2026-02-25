@@ -315,6 +315,12 @@ cp verl_rl/patches/mamba_ssm__init__.py "$MAMBA_INIT"
 #    model dir to sys.path before loading. If permission denied:
 #    sudo chmod 666 $(python -c "import verl.workers.fsdp_workers; print(verl.workers.fsdp_workers.__file__)")
 python verl_rl/patches/apply_fsdp_nemotron_fix.py
+# 4. Patch verl tool schemas to preserve extra fields (default, array types)
+#    Without this, verl's Pydantic validation strips "default" values and rejects
+#    array types like ["integer", "string"] from tool definitions, causing the RL
+#    prompt to differ from the SFT training prompt.
+cp verl_rl/patches/verl_tool_schemas.py \
+   "$(python -c "import verl; import os; print(os.path.dirname(verl.__file__))")/tools/schemas.py"
 ```
 
 **Note:** These patches modify files outside this repo (`~/.cache/huggingface/`, `site-packages/mamba_ssm/`, and `site-packages/verl/`). They need to be re-applied if you reinstall these packages or clear your HuggingFace cache.

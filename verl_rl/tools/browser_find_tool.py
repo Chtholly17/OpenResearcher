@@ -24,6 +24,8 @@ from verl.tools.base_tool import BaseTool
 from verl.tools.schemas import OpenAIFunctionToolSchema, ToolResponse
 from verl.utils.rollout_trace import rollout_trace_op
 
+from verl_rl.tools._session_state import increment_tool_calls, is_budget_exhausted, should_warn, BUDGET_EXHAUSTED_MSG, BUDGET_WARNING_MSG
+
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
@@ -54,6 +56,13 @@ class BrowserFindTool(BaseTool):
 
         if not pattern:
             return ToolResponse(text="Error: empty search pattern"), 0.0, {}
+
+        # Use trajectory-level request_id for budget tracking (not per-call instance_id)
+        agent_data = kwargs.get("agent_data")
+        traj_id = getattr(agent_data, "request_id", instance_id) if agent_data else instance_id
+        increment_tool_calls(traj_id)
+        if is_budget_exhausted(traj_id):
+            return ToolResponse(text=BUDGET_EXHAUSTED_MSG), 0.0, {"budget_exhausted": True}
 
         self._instance_dict[instance_id]["find_count"] += 1
 
@@ -87,6 +96,8 @@ class BrowserFindTool(BaseTool):
             else:
                 result_text = json.dumps(result, ensure_ascii=False)
 
+            if should_warn(traj_id):
+                result_text += BUDGET_WARNING_MSG
             return (
                 ToolResponse(text=result_text),
                 0.0,
