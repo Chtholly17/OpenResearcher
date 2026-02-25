@@ -48,10 +48,44 @@ REWARD_MODULE="$PROJECT_DIR/verl_rl/reward/openresearcher_reward.py"
 TIMESTAMP=$(date '+%m%d-%H%M')
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_multiturn_${TIMESTAMP}}"
 
+# ---- Download data if not present ----
+HF_DATA_REPO="PahaII/openresearcher-training-data"
+DATA_DIR="$PROJECT_DIR/data"
+DATA_FILES=(
+    "train_curriculum_500.parquet"
+    "train_curriculum_1k.parquet"
+    "train_curriculum_2k.parquet"
+    "train_no_passrate1.parquet"
+    "test_20.parquet"
+)
+
+missing_files=()
+for f in "${DATA_FILES[@]}"; do
+    if [ ! -f "$DATA_DIR/$f" ]; then
+        missing_files+=("$f")
+    fi
+done
+
+if [ ${#missing_files[@]} -gt 0 ]; then
+    echo "Downloading missing data files from $HF_DATA_REPO..."
+    mkdir -p "$DATA_DIR"
+    for f in "${missing_files[@]}"; do
+        echo "  Downloading $f..."
+        python3 -c "
+from huggingface_hub import hf_hub_download
+hf_hub_download(repo_id='$HF_DATA_REPO', filename='$f', repo_type='dataset', local_dir='$DATA_DIR')
+" || { echo "ERROR: Failed to download $f"; exit 1; }
+    done
+    echo "Download complete."
+fi
+
 # ---- Validate prerequisites ----
 if [ ! -f "$TRAIN_DATA" ]; then
     echo "ERROR: Training data not found at $TRAIN_DATA"
-    echo "Run: python verl_rl/preprocess_openresearcher.py --hf_dataset OpenResearcher/OpenResearcher-Dataset --hf_subset seed_42 --local_save_dir ~/data/openresearcher"
+    echo "Available files in $DATA_DIR:"
+    ls -1 "$DATA_DIR"/*.parquet 2>/dev/null || echo "  (none)"
+    echo "Set TRAIN_DATA to one of the above, e.g.:"
+    echo "  TRAIN_DATA=$DATA_DIR/train_curriculum_500.parquet bash verl_rl/run_grpo_training.sh"
     exit 1
 fi
 
@@ -161,9 +195,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
     actor_rollout_ref.rollout.max_model_len=131072 \
     actor_rollout_ref.rollout.n=8 \
-    actor_rollout_ref.rollout.val_kwargs.n=2 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.max_num_seqs=256 \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=500 \
     actor_rollout_ref.rollout.multi_turn.max_user_turns=500 \
@@ -171,8 +205,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG" \
     actor_rollout_ref.rollout.multi_turn.interaction_config_path="$INTERACTION_CONFIG" \
     custom_reward_function.path="$REWARD_MODULE" \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    algorithm.rollout_correction.bypass_mode=True \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
     trainer.project_name='openresearcher_rl' \
@@ -180,7 +215,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.n_gpus_per_node=$N_GPUS \
     trainer.nnodes=$NNODES \
     trainer.total_epochs=2 \
-    trainer.val_before_train=True \
-    trainer.test_freq=35 \
+    trainer.val_before_train=False \
+    trainer.test_freq=50 \
     trainer.logger='["console","wandb"]' \
     "$@"
