@@ -20,12 +20,18 @@
 set -x
 ulimit -n 65535
 
+unset TORCH_ALLOW_TF32_CUBLAS_OVERRIDE
+unset NVIDIA_TF32_OVERRIDE
+unset NCCL_TF32_OVERRIDE
+export TORCH_FP32_PRECISION=tf32
+
 # ---- Configuration ----
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
+# VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
+echo "VERL_DIR: $VERL_DIR"
 CONFIG_PATH="$PROJECT_DIR/verl_rl/config"
 
-N_GPUS="${N_GPUS:-8}"
+N_GPUS="${N_GPUS:-4}"
 NNODES="${NNODES:-1}"
 
 # TP=2: 30B-A3B fits in 2×141GB → 4 server groups (vs 2 on A100 with TP=4)
@@ -147,6 +153,10 @@ if [ -n "$VERL_SCHEMAS" ] && ! grep -q 'extra="allow"' "$VERL_SCHEMAS"; then
     cp "$PROJECT_DIR/verl_rl/patches/verl_tool_schemas.py" "$VERL_SCHEMAS"
 fi
 
+
+export PYTHONPATH="$PROJECT_DIR/verl_rl/torch_hooks:$PROJECT_DIR:${PYTHONPATH:-}"
+export TORCH_HOOKS_VERBOSE=1
+
 # ---- Launch training ----
 export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
 export RAY_memory_monitor_refresh_ms=0
@@ -154,9 +164,12 @@ export PYTORCH_ALLOC_CONF=expandable_segments:True
 export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug.jsonl}"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
-cd "$VERL_DIR"
+# cd "$VERL_DIR"
 
-python3 -m verl.trainer.main_ppo \
+PYTHON="${PROJECT_DIR}/.venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON=python3
+
+"$PYTHON" -m verl.trainer.main_ppo \
     --config-path="$CONFIG_PATH" \
     --config-name='openresearcher_multiturn_grpo' \
     algorithm.adv_estimator=grpo \
@@ -181,7 +194,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bf16 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
     actor_rollout_ref.rollout.max_model_len=102400 \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \

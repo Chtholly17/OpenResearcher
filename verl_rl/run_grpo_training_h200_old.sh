@@ -33,20 +33,15 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
 CONFIG_PATH="$PROJECT_DIR/verl_rl/config"
 
-N_GPUS="${N_GPUS:-8}"
+N_GPUS="${N_GPUS:-4}"
 NNODES="${NNODES:-1}"
 
 # Model: 30B-A3B MoE with TP=4 for rollout (2 server groups)
 TP_SIZE="${TP_SIZE:-4}"
 
 # Data paths
-<<<<<<< HEAD:verl_rl/run_grpo_training_h200_old.sh
 TRAIN_DATA="/fsx-shared/juncheng/data/openresearcher/train.parquet"
 VAL_DATA="/fsx-shared/juncheng/data/openresearcher/test.parquet"
-=======
-TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/train.parquet}"
-VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/test.parquet}"
->>>>>>> 807a350fa3f2bf7a5dfb60ce1edba9e267089d41:verl_rl/run_grpo_training.sh
 
 # Search service URL (must be running)
 SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://127.0.0.1:8090}"
@@ -171,12 +166,6 @@ export RAY_memory_monitor_refresh_ms=0
 # Help PyTorch manage fragmented GPU memory (avoids OOM on the 30B MoE model)
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 
-<<<<<<< HEAD:verl_rl/run_grpo_training_h200_old.sh
-# Run from PROJECT_DIR so Python uses verl from venv (site-packages), not the
-# cloned verl at VERL_DIR. When cd'd into VERL_DIR, sys.path[0]=cwd would load
-# the local verl package instead of the venv's installed version.
-cd "$PROJECT_DIR"
-=======
 # Enable reward function debug logging (first 20 samples)
 export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug.jsonl}"
 
@@ -185,27 +174,20 @@ export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
 # Working directory must be the verl root for hydra config resolution
 cd "$VERL_DIR"
->>>>>>> 807a350fa3f2bf7a5dfb60ce1edba9e267089d41:verl_rl/run_grpo_training.sh
 
 # Use venv python if available (ensures correct verl from site-packages)
 PYTHON="${PROJECT_DIR}/.venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON=python3
 
-"$PYTHON" -m verl.trainer.main_ppo \
+CUDA_VISIBLE_DEVICES=0,1,2,3  "$PYTHON" -m verl.trainer.main_ppo \
     --config-path="$CONFIG_PATH" \
     --config-name='openresearcher_multiturn_grpo' \
     algorithm.adv_estimator=grpo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA" \
-<<<<<<< HEAD:verl_rl/run_grpo_training_h200_old.sh
-    data.train_batch_size=8 \
-    data.max_prompt_length=2048 \
-    data.max_response_length=2048 \
-=======
     data.train_batch_size=4 \
     data.max_prompt_length=4096 \
     data.max_response_length=126976 \
->>>>>>> 807a350fa3f2bf7a5dfb60ce1edba9e267089d41:verl_rl/run_grpo_training.sh
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
@@ -213,7 +195,7 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=8 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
