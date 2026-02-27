@@ -18,6 +18,19 @@ Do not quote more than 10 words directly from the tool output.
 sources=web
 """.strip()
 
+# Qwen3-specific system prompt. Simpler than the Nemotron version:
+# - No citation format (Qwen3 wasn't SFT-trained with 【cursor†L...】 syntax)
+# - <answer> tags are the primary answer format (easy to extract reliably)
+# - Matches Qwen3's instruction-following style
+DEVELOPER_CONTENT_QWEN3 = """
+You are a helpful research assistant with access to web browsing tools.
+
+You can search the web, open URLs, and find information to answer questions accurately.
+
+The `cursor` appears in brackets before each browsing display: `[{cursor}]`.
+sources=web
+""".strip()
+
 TOOL_CONTENT = """
 [
   {

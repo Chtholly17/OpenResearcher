@@ -137,18 +137,17 @@ def compute_score(
 ) -> float:
     """Compute reward score for a research answer.
 
-    Reward structure with efficiency scaling:
+    v0.1 reward structure (simplified for maximum GRPO gradient signal):
 
-      Correct + efficient   → up to 1.2  (base 1.0 + efficiency bonus 0.2)
-      Correct + inefficient → down to 0.8 (base 1.0 - efficiency penalty 0.2)
-      Wrong + efficient     → 0.3         (format reward, fixed)
-      Wrong + inefficient   → down to 0.1 (penalise wasted long trajectories)
+      Correct + explicit    → 1.0   (binary correctness signal)
+      Wrong   + explicit    → 0.1   (format reward, fixed — no efficiency scaling)
       No answer             → 0.0
 
-    The efficiency component creates a clear gradient:
-      - For correct answers: small bonus/penalty (±0.2) — correctness dominates
-      - For wrong answers: larger penalty (0.3→0.1) — long wrong trajectories
-        are the worst outcome and receive the lowest non-zero reward
+    Rationale: the previous efficiency-scaled wrong-answer reward (0.1–0.3)
+    caused all wrong-answer rollouts in a batch to cluster at ~0.26, making
+    within-group variance ≈ 0 and GRPO advantages ≈ 0 on ~36% of steps.
+    Fixed rewards maximise within-group variance so the gradient is non-zero
+    whenever the model gets at least one correct and one wrong answer per group.
     """
     answer, is_explicit = extract_answer(solution_str)
 
@@ -177,19 +176,10 @@ def compute_score(
     )
 
     if is_explicit:
-        if is_correct:
-            # Base 1.0, efficiency bonus/penalty in [-0.2, +0.2]
-            score = 1.0 + 0.2 * (2 * efficiency - 1.0)  # maps eff 0→0.8, 0.5→1.0, 1→1.2
-        else:
-            # Wrong explicit answer: base 0.3, penalise long wrong trajectories
-            # Maps eff 0→0.1, 0.5→0.2, 1→0.3
-            score = 0.1 + 0.2 * efficiency
+        score = 1.0 if is_correct else 0.1
     else:
-        # Fallback extraction (from <think> blocks)
-        if is_correct:
-            score = 0.8 + 0.1 * (2 * efficiency - 1.0)  # maps eff 0→0.7, 0.5→0.8, 1→0.9
-        else:
-            score = 0.05 + 0.1 * efficiency  # maps eff 0→0.05, 0.5→0.1, 1→0.15
+        # Fallback extraction (from <think> blocks) — lower confidence
+        score = 0.8 if is_correct else 0.05
 
     _debug_log(json.dumps({
         "event": "answer_found",
@@ -201,7 +191,6 @@ def compute_score(
         "gt_norm": gt_norm[:100],
         "num_turns": num_turns,
         "resp_len": resp_len,
-        "efficiency": round(efficiency, 3),
         "score": round(score, 4),
     }, ensure_ascii=False))
     return score

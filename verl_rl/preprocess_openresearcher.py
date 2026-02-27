@@ -36,13 +36,12 @@ import datasets
 
 # Add parent directory so we can import data_utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from data_utils import DEVELOPER_CONTENT, load_dataset_unified
+from data_utils import DEVELOPER_CONTENT, DEVELOPER_CONTENT_QWEN3, load_dataset_unified
 
 DATA_SOURCE = "OpenResearcher/OpenResearcher"
 
-# Answer submission instructions appended to the SFT system prompt.
-# The SFT model was trained to generate "Exact Answer:" + "Confidence:" after
-# researching, or to call submit_answer (which wraps in <answer> tags).
+# Answer submission instructions for Nemotron (SFT-trained model).
+# The SFT model knows "Exact Answer:" + "Confidence:" and submit_answer tool.
 # We instruct both approaches so the model uses whatever it's most comfortable with.
 ANSWER_INSTRUCTIONS = """
 
@@ -55,25 +54,43 @@ Confidence: [high/medium/low]
 You MUST submit an answer before your research budget runs out. Do not end without providing an answer.
 If you cannot find the exact answer, submit your best guess."""
 
+# Answer submission instructions for Qwen3 models.
+# Qwen3 has no SFT history with this task, so we teach it the two answer formats
+# explicitly. <answer> tags are made primary since they are easier to extract
+# reliably and do not require a tool call.
+ANSWER_INSTRUCTIONS_QWEN3 = """
 
-def make_verl_record(qid, question, answer, split, idx):
+When you have gathered enough information, submit your final answer using ONE of:
+1. Call the submit_answer tool with your answer (wraps in <answer> tags), OR
+2. Write directly in your response: <answer>your answer here</answer>
+
+Keep your answer concise. You MUST submit an answer before your research budget runs out.
+If you cannot find the exact answer, submit your best guess."""
+
+
+def make_verl_record(qid, question, answer, split, idx, model_type="nemotron"):
     """Convert a single (question, answer) pair into verl's required parquet format.
 
     Key design decisions:
-    - System prompt: Use DEVELOPER_CONTENT from SFT + ANSWER_INSTRUCTIONS that teach
-      the model to submit <answer> tags. The SFT model was never trained with answer
-      tags, so the RL system prompt must add this instruction.
+    - System prompt: Selected by model_type. Nemotron uses its SFT system prompt +
+      "Exact Answer:" instructions. Qwen3 uses a simpler prompt with <answer> tags
+      as the primary answer format.
     - Browser tools don't need per-instance create_kwargs since they connect to a
       shared stateful search service. The tools_kwargs are left empty for them.
     - interaction_kwargs enable the interaction handler to give feedback when the
       agent submits an answer (correct/incorrect), allowing multi-turn refinement.
     """
+    if model_type == "qwen3":
+        system_content = DEVELOPER_CONTENT_QWEN3 + ANSWER_INSTRUCTIONS_QWEN3
+    else:
+        system_content = DEVELOPER_CONTENT + ANSWER_INSTRUCTIONS
+
     return {
         "data_source": DATA_SOURCE,
         "prompt": [
             {
                 "role": "system",
-                "content": DEVELOPER_CONTENT + ANSWER_INSTRUCTIONS,
+                "content": system_content,
             },
             {
                 "role": "user",
@@ -192,7 +209,7 @@ def load_from_jsonl(jsonl_pattern):
     return records
 
 
-def convert_and_save(records, local_save_dir):
+def convert_and_save(records, local_save_dir, model_type="nemotron"):
     """Convert records to verl format and save as parquet."""
     os.makedirs(local_save_dir, exist_ok=True)
 
@@ -210,6 +227,7 @@ def convert_and_save(records, local_save_dir):
                     answer=rec["answer"],
                     split=split_name,
                     idx=idx,
+                    model_type=model_type,
                 )
             )
 
@@ -267,6 +285,17 @@ if __name__ == "__main__":
         default="~/data/openresearcher",
         help="Output directory for parquet files",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="nemotron",
+        choices=["nemotron", "qwen3"],
+        help=(
+            "Model family to generate prompts for. "
+            "'nemotron' uses the SFT system prompt with 'Exact Answer:' format. "
+            "'qwen3' uses a simpler prompt with <answer> tags as primary format."
+        ),
+    )
 
     args = parser.parse_args()
     save_dir = os.path.expanduser(args.local_save_dir)
@@ -278,5 +307,5 @@ if __name__ == "__main__":
     elif args.jsonl_path:
         records = load_from_jsonl(args.jsonl_path)
 
-    convert_and_save(records, save_dir)
+    convert_and_save(records, save_dir, model_type=args.model_type)
     print(f"\nDone. Files saved to: {save_dir}")
