@@ -44,9 +44,11 @@ def extract_answer(text: str) -> tuple[Optional[str], bool]:
         return None, False
 
     # <answer>...</answer> (from submit_answer tool or explicit tags)
-    match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        return match.group(1).strip(), True
+    # Use the LAST match: the interaction may tell the model "wrong, try again",
+    # causing multiple submissions. The final attempt is the best answer.
+    matches = re.findall(r"<answer>(.*?)</answer>", text, re.DOTALL | re.IGNORECASE)
+    if matches:
+        return matches[-1].strip(), True
 
     # "Exact Answer:" format
     match = re.search(r"Exact Answer:\s*(.*?)(?:\n|Confidence:|$)", text, re.IGNORECASE | re.DOTALL)
@@ -128,6 +130,25 @@ def _compute_efficiency(num_turns: int, resp_len: int) -> float:
     return 0.5 * turn_eff + 0.5 * len_eff
 
 
+def _count_search_calls(text: str) -> int:
+    """Count browser.search tool calls in the trajectory."""
+    return len(re.findall(r'"name"\s*:\s*"browser\.search"', text))
+
+
+def _length_efficiency(num_turns: int) -> float:
+    """Efficiency factor in [0, 1] based on number of turns.
+
+    Linear decay: 1.0 at 0 turns → 0.0 at CEILING turns.
+    Reference points for high-pass data (correct answers avg ~40 turns):
+      10 turns  → 0.98  (very efficient)
+      50 turns  → 0.90  (efficient)
+      250 turns → 0.50  (midpoint, score=1.0)
+      500 turns → 0.00  (at ceiling, score=0.8)
+    """
+    TURN_CEILING = 500
+    return max(0.0, 1.0 - num_turns / TURN_CEILING)
+
+
 def compute_score(
     data_source: str,
     solution_str: str,
@@ -137,31 +158,43 @@ def compute_score(
 ) -> float:
     """Compute reward score for a research answer.
 
-    v0.1 reward structure (simplified for maximum GRPO gradient signal):
+    v0.5 reward structure — three signals combined:
 
-      Correct + explicit    → 1.0   (binary correctness signal)
-      Wrong   + explicit    → 0.1   (format reward, fixed — no efficiency scaling)
-      No answer             → 0.0
+      1. Correctness:   did the model get the right answer?
+      2. Search effort: did the model use browser.search (≥1 call)?
+      3. Efficiency:    how quickly did it reach the correct answer?
 
-    Rationale: the previous efficiency-scaled wrong-answer reward (0.1–0.3)
-    caused all wrong-answer rollouts in a batch to cluster at ~0.26, making
-    within-group variance ≈ 0 and GRPO advantages ≈ 0 on ~36% of steps.
-    Fixed rewards maximise within-group variance so the gradient is non-zero
-    whenever the model gets at least one correct and one wrong answer per group.
+    Score table:
+      Correct + ≥1 searches  → 0.8 + 0.4 * eff   ∈ [0.8, 1.2]
+                                 short (10 turns)  → ~1.19
+                                 medium (50 turns) → ~1.16
+                                 long (250 turns)  →  1.00
+                                 very long (500+)  →  0.80
+      Correct + 0 searches   → 0.3   (memory recall, no length bonus)
+      Wrong   + ≥1 searches  → 0.1   (searched but wrong, fixed)
+      Wrong   + 0 searches   → 0.0   (guessed without searching)
+      No answer              → 0.0
+
+    Key design decisions vs v0.4:
+    - Length bonus ONLY on correct+searched: prevents the v0.1 problem where
+      wrong answers clustered at similar efficiency-scaled values.
+    - Memory recall penalty (0.3 vs 1.0): discourages answering from
+      pretraining knowledge without engaging tools (75% of v0.4 correct
+      answers had 0-1 searches, polluting the gradient signal).
+    - Wrong+no-search = 0.0: removes incentive for pure guessing.
     """
     answer, is_explicit = extract_answer(solution_str)
 
     num_turns = int(extra_info.get("num_turns", 0)) if extra_info else 0
     resp_len = len(solution_str) if solution_str else 0
-    efficiency = _compute_efficiency(num_turns, resp_len)
+    n_searches = _count_search_calls(solution_str) if solution_str else 0
 
     if answer is None:
         _debug_log(json.dumps({
             "event": "no_answer",
             "ground_truth": ground_truth,
             "num_turns": num_turns,
-            "resp_len": resp_len,
-            "efficiency": round(efficiency, 3),
+            "n_searches": n_searches,
             "resp_tail_500": (solution_str[-500:] if solution_str else ""),
             "score": 0.0,
         }, ensure_ascii=False))
@@ -175,22 +208,33 @@ def compute_score(
         and (pred_norm == gt_norm or gt_norm in pred_norm or pred_norm in gt_norm)
     )
 
+    searched = n_searches >= 1
+
     if is_explicit:
-        score = 1.0 if is_correct else 0.1
+        if is_correct and searched:
+            eff = _length_efficiency(num_turns)
+            score = 0.8 + 0.4 * eff          # [0.8, 1.2]
+        elif is_correct and not searched:
+            score = 0.3                        # memory recall — partial credit
+        elif not is_correct and searched:
+            score = 0.1                        # searched but wrong
+        else:
+            score = 0.0                        # guessed without searching
     else:
-        # Fallback extraction (from <think> blocks) — lower confidence
-        score = 0.8 if is_correct else 0.05
+        # Fallback extraction from <think> blocks — lower confidence
+        score = 0.5 if is_correct else 0.05
 
     _debug_log(json.dumps({
         "event": "answer_found",
         "answer_extracted": answer[:200],
         "is_explicit": is_explicit,
         "is_correct": is_correct,
+        "searched": searched,
         "ground_truth": ground_truth,
         "pred_norm": pred_norm[:100],
         "gt_norm": gt_norm[:100],
         "num_turns": num_turns,
-        "resp_len": resp_len,
+        "n_searches": n_searches,
         "score": round(score, 4),
     }, ensure_ascii=False))
     return score

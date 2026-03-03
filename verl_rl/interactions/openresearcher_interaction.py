@@ -123,14 +123,17 @@ class OpenResearcherInteraction(BaseInteraction):
             )
 
             if is_correct:
-                return True, "Your answer is correct!", reward, {"correct": True}
+                # Correct answer: terminate immediately.
+                return True, "", reward, {"correct": True}
             else:
-                # Don't terminate on wrong answer - let the agent try again
-                # (up to max_user_turns)
-                return False, (
-                    "Your answer appears to be incorrect. "
-                    "Consider searching for additional sources to verify your findings."
-                ), reward, {"correct": False}
+                # Wrong answer (v0.3): do NOT terminate. Return empty response so
+                # the model can keep searching. No "try again" text to avoid noisy
+                # retry loops — the model decides whether to search more or submit
+                # a new answer. The reward function reads the LAST <answer> tag, so
+                # a correct retry will be rewarded. The minimum-search gate in the
+                # reward function (MIN_SEARCH_CALLS=5) ensures the model can't earn
+                # even the 0.1 format reward without doing real research.
+                return False, "", 0.0, {"correct": False}
 
         # No answer found in the message - agent is still researching
         # Don't penalize, just acknowledge
