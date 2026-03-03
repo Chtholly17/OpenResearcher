@@ -40,7 +40,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON="${PYTHON:-/opt/dlami/nvme/hqhd-miniconda3/envs/openresearcher/bin/python}"
+PYTHON="${PROJECT_DIR}/.venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON=python3
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 PASS_RATE_MIN="${PASS_RATE_MIN:-0.875}"   # minimum Nemotron pass rate (inclusive)

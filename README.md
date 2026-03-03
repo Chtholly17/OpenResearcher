@@ -92,6 +92,16 @@ cd ..
 uv pip install -e .
 ```
 
+**Tip: Shared environment across machines**
+
+If OpenResearcher is shared across multiple machines (e.g., via FSx or NFS), the `.venv` created on one machine may have broken Python symlinks on others. To fix this without recreating the environment:
+
+```bash
+uv python install 3.12
+```
+
+This installs Python 3.12 to the path the venv expects. If both machines use the same architecture (x86_64) and user, the existing site-packages will work without reinstalling.
+
 ### Deep Research Benchmarks Preparation
 
 Run the setup script to automatically download the **[BrowseComp-Plus](https://arxiv.org/abs/2508.06600)** benchmark. Other benchmarks, including **[BrowseComp](https://arxiv.org/abs/2504.12516)**, **[GAIA](https://arxiv.org/abs/2311.12983)** and **[xbench-DeepResearch](https://github.com/THUDM/xbench)**, will be set up automatically when they are first used.

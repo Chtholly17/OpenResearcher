@@ -55,15 +55,24 @@
 set -euo pipefail
 ulimit -n 65535
 
+unset TORCH_ALLOW_TF32_CUBLAS_OVERRIDE
+unset NVIDIA_TF32_OVERRIDE
+unset NCCL_TF32_OVERRIDE
+export TORCH_FP32_PRECISION=tf32
+export HF_ENABLE_PARALLEL_LOADING=true
+export HF_PARALLEL_LOADING_WORKERS=8
+
 # ── Configuration ────────────────────────────────────────────────────────────
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON="${PYTHON:-/opt/dlami/nvme/hqhd-miniconda3/envs/openresearcher/bin/python}"
+PYTHON="${PROJECT_DIR}/.venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON=python3
+
 
 # GPUs: training uses 4 GPUs with TP=2 (2 vLLM server groups)
 # Search service should be on the remaining GPUs (e.g. 0-1)
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4,5,6,7}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 N_GPUS="${N_GPUS:-4}"
-TP_SIZE="${TP_SIZE:-2}"
+TP_SIZE="${TP_SIZE:-1}"
 
 # Data
 TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/qwen3_highpass/train.parquet}"
@@ -101,6 +110,25 @@ echo "Experiment:     $EXPERIMENT_NAME"
 echo "lr=1e-5  clip_grad=0.5  bs=16  max_response=12288"
 echo "=========================================="
 
+HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
+NEMOTRON_GLOB="$HF_CACHE_DIR/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py"
+for f in $NEMOTRON_GLOB; do
+    if [ -f "$f" ]; then
+        if ! grep -q '_supports_flash_attn_2' "$f"; then
+            echo "Applying NemotronH flash attention patch to: $f"
+            cp "$PROJECT_DIR/verl_rl/patches/modeling_nemotron_h.py" "$f"
+        fi
+    fi
+done
+
+# Patch 2: mamba-ssm graceful import
+MAMBA_INIT=$("$PYTHON" -c "import mamba_ssm; print(mamba_ssm.__file__)" 2>/dev/null)
+if [ -n "$MAMBA_INIT" ] && ! grep -q 'except ImportError' "$MAMBA_INIT"; then
+    echo "Applying mamba-ssm graceful import patch to: $MAMBA_INIT"
+    cp "$PROJECT_DIR/verl_rl/patches/mamba_ssm__init__.py" "$MAMBA_INIT"
+fi
+
+
 # ── Apply verl tool schemas patch (idempotent) ────────────────────────────────
 VERL_SCHEMAS=$("$PYTHON" -c "import verl.tools.schemas; print(verl.tools.schemas.__file__)" 2>/dev/null)
 if [ -n "$VERL_SCHEMAS" ] && ! grep -q 'extra="allow"' "$VERL_SCHEMAS" 2>/dev/null; then
@@ -136,7 +164,7 @@ export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug_v0.8.jsonl}"
     actor_rollout_ref.actor.optim.lr=1e-5 \
     actor_rollout_ref.actor.optim.clip_grad=0.5 \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \

@@ -31,6 +31,13 @@
 set -x
 ulimit -n 65535
 
+unset TORCH_ALLOW_TF32_CUBLAS_OVERRIDE
+unset NVIDIA_TF32_OVERRIDE
+unset NCCL_TF32_OVERRIDE
+export TORCH_FP32_PRECISION=tf32
+export HF_ENABLE_PARALLEL_LOADING=true
+export HF_PARALLEL_LOADING_WORKERS=8
+
 # ---- Configuration ----
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
@@ -129,6 +136,25 @@ echo "Experiment:     $EXPERIMENT_NAME"
 echo "=========================================="
 
 # ---- Apply monkey patches ----
+
+HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
+NEMOTRON_GLOB="$HF_CACHE_DIR/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py"
+for f in $NEMOTRON_GLOB; do
+    if [ -f "$f" ]; then
+        if ! grep -q '_supports_flash_attn_2' "$f"; then
+            echo "Applying NemotronH flash attention patch to: $f"
+            cp "$PROJECT_DIR/verl_rl/patches/modeling_nemotron_h.py" "$f"
+        fi
+    fi
+done
+
+# Patch 2: mamba-ssm graceful import
+MAMBA_INIT=$("$PYTHON" -c "import mamba_ssm; print(mamba_ssm.__file__)" 2>/dev/null)
+if [ -n "$MAMBA_INIT" ] && ! grep -q 'except ImportError' "$MAMBA_INIT"; then
+    echo "Applying mamba-ssm graceful import patch to: $MAMBA_INIT"
+    cp "$PROJECT_DIR/verl_rl/patches/mamba_ssm__init__.py" "$MAMBA_INIT"
+fi
+
 # Patch: verl tool schemas (extra="allow" + array types)
 VERL_SCHEMAS=$(python3 -c "import verl.tools.schemas; print(verl.tools.schemas.__file__)" 2>/dev/null)
 if [ -n "$VERL_SCHEMAS" ] && ! grep -q 'extra="allow"' "$VERL_SCHEMAS"; then
