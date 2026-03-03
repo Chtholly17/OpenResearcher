@@ -1,86 +1,69 @@
 #!/bin/bash
-# GRPO training script for Qwen3-8B — v0.8 config
+# GRPO training script for Qwen3-8B — v0.8 config (A100 80GB)
 #
-# Key design decisions vs earlier versions:
+# Key design decisions:
 #
-#   Data: qwen3_highpass (Nemotron pass_rate 0.875–1.0, 1874 examples)
-#     - 43% per-rollout correct rate vs 12% on mid-difficulty data
-#     - System prompt mandates browser.search (fixes memory-recall problem)
-#     - Reward penalises 0-search correct answers (0.3 vs 1.0)
+#   Data: qwen3_highpass (Nemotron pass_rate ≥ 0.875, 1874 examples)
+#     - 43% per-rollout correct rate → near-zero dead-gradient steps
+#     - System prompt mandates browser.search (no memory-recall shortcuts)
+#     - Reward v0.5: correct+searched → length bonus [0.8,1.2],
+#                   correct+no_search → 0.3, wrong+searched → 0.1
 #
-#   lr=1e-5  (not 1e-6 which froze the policy, not higher which diverges)
-#   clip_grad=0.5  (prevents the gradient spike that collapsed v0.6 at step 65)
-#   train_batch_size=16, ppo_mini_batch_size=16
-#     - With ~43% correct rate and n=8: P(0 correct in group) = 0.57^8 = 1%
-#     - 16 questions → ~10.4 useful questions per step (vs 2.6 with bs=4)
-#     - Reduces step-level reward variance from σ≈0.15 (bs=4) to σ≈0.07 (bs=16)
+#   lr=1e-5       (1e-6 froze policy; 1e-5 learns but must resume after ~75 steps)
+#   clip_grad=0.5 (prevents entropy spike that collapsed runs at step ~65-90)
+#   bs=16, n=8    (10.4 useful questions/step; σ≈0.07 vs σ≈0.15 for bs=4)
+#   TP=2          (A100-80GB: 2 GPUs per vLLM group → 2 server groups on 4 GPUs)
+#   resume_mode=auto  (resumes from latest checkpoint automatically)
+#
+# Hardware layout (8× A100-80GB):
+#   GPUs 0-1  — dense search service (Qwen3-Embedding-8B, ~15 GB each)
+#   GPUs 4-7  — training (FSDP + vLLM colocated)
 #
 # Prerequisites:
-#   1. Dense search service running on GPUs 0-1, port 8090:
+#   1. Dense search service on GPUs 0-1, port 8090:
+#        bash verl_rl/prepare_highpass_data.sh  # once, to create data/qwen3_highpass/
 #        CUDA_VISIBLE_DEVICES=0,1 GPU_IDS=0,1 \
 #          SEARCHER_TYPE=dense \
-#          DENSE_INDEX_PATH="$PROJECT/Tevatron/browsecomp-plus-indexes/qwen3-embedding-8b/*.pkl" \
+#          DENSE_INDEX_PATH="$PROJECT_DIR/Tevatron/browsecomp-plus-indexes/qwen3-embedding-8b/*.pkl" \
 #          DENSE_MODEL_NAME="Qwen/Qwen3-Embedding-8B" \
-#          LUCENE_EXTRA_DIR="$PROJECT/tevatron" \
-#          CORPUS_PARQUET_PATH="$PROJECT/Tevatron/browsecomp-plus-corpus/data/*.parquet" \
+#          LUCENE_EXTRA_DIR="$PROJECT_DIR/tevatron" \
+#          CORPUS_PARQUET_PATH="$PROJECT_DIR/Tevatron/browsecomp-plus-corpus/data/*.parquet" \
 #          python -m uvicorn scripts.deploy_search_service:app --host 0.0.0.0 --port 8090
-#   2. Training data at data/qwen3_highpass/ (regenerate if system prompt changed):
-#        python -c "
-#          from datasets import load_dataset, Dataset
-#          import sys; sys.path.insert(0, '.')
-#          sys.path.insert(0, 'verl_rl')
-#          from preprocess_openresearcher import make_verl_record
-#          import random, os
-#          random.seed(42)
-#          ds = load_dataset('Chtholly17/OR_reject_sampling', split='train')
-#          hp = [r for r in ds if r['pass_rate'] >= 0.875]
-#          random.shuffle(hp)
-#          Dataset.from_list([make_verl_record(str(r['qid']),r['question'],r['correct_answer'],'train',i,'qwen3') for i,r in enumerate(hp[20:])]).to_parquet('data/qwen3_highpass/train.parquet')
-#          Dataset.from_list([make_verl_record(str(r['qid']),r['question'],r['correct_answer'],'test',i,'qwen3') for i,r in enumerate(hp[:20])]).to_parquet('data/qwen3_highpass/test.parquet')
-#        "
-#   3. conda activate openresearcher (or use full python path)
+#   2. Training data at data/qwen3_highpass/:
+#        bash verl_rl/prepare_highpass_data.sh
+#   3. conda activate openresearcher (or set PYTHON env var)
 #
 # Usage:
-#   # Default: GPUs 4-7 for training, search service on 0-1
 #   bash verl_rl/run_grpo_training_qwen3_v0.8.sh
 #
-#   # Override GPU assignment
-#   CUDA_VISIBLE_DEVICES=0,1,2,3 bash verl_rl/run_grpo_training_qwen3_v0.8.sh
+#   # Resume from a specific checkpoint
+#   RESUME_FROM=checkpoints/openresearcher_rl/grpo_qwen3_v0.8_highpass/global_step_75 \
+#   bash verl_rl/run_grpo_training_qwen3_v0.8.sh
 #
-#   # Override experiment name and data
+#   # Override GPUs / experiment name
+#   CUDA_VISIBLE_DEVICES=2,3,4,5 N_GPUS=4 \
 #   EXPERIMENT_NAME=grpo_v0.8_run2 \
-#   TRAIN_DATA=data/qwen3_highpass/train.parquet \
 #   bash verl_rl/run_grpo_training_qwen3_v0.8.sh
 
 set -euo pipefail
 ulimit -n 65535
 
-unset TORCH_ALLOW_TF32_CUBLAS_OVERRIDE
-unset NVIDIA_TF32_OVERRIDE
-unset NCCL_TF32_OVERRIDE
-export TORCH_FP32_PRECISION=tf32
-export HF_ENABLE_PARALLEL_LOADING=true
-export HF_PARALLEL_LOADING_WORKERS=8
-
 # ── Configuration ────────────────────────────────────────────────────────────
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PROJECT_DIR}/.venv/bin/python"
-[ -x "$PYTHON" ] || PYTHON=python3
+[ -x "$PYTHON" ] || PYTHON="${PYTHON:-/opt/dlami/nvme/hqhd-miniconda3/envs/openresearcher/bin/python}"
 
-
-# GPUs: training uses 4 GPUs with TP=2 (2 vLLM server groups)
-# Search service should be on the remaining GPUs (e.g. 0-1)
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+# A100 layout: GPUs 4-7 for training, GPUs 0-1 for search service
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-4,5,6,7}"
 N_GPUS="${N_GPUS:-4}"
-TP_SIZE="${TP_SIZE:-1}"
+TP_SIZE="${TP_SIZE:-2}"   # 2 GPUs per vLLM group → 2 server groups on 4 GPUs
 
-# Data
 TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/qwen3_highpass/train.parquet}"
 VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/qwen3_highpass/test.parquet}"
 SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://127.0.0.1:8090}"
 
 TIMESTAMP=$(date '+%m%d-%H%M')
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_v0.8_${TIMESTAMP}}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_v0.8_highpass}"
 
 TOOL_CONFIG="$PROJECT_DIR/verl_rl/config/tool_config/openresearcher_tool_config.yaml"
 INTERACTION_CONFIG="$PROJECT_DIR/verl_rl/config/interaction_config/openresearcher_interaction_config.yaml"
@@ -89,7 +72,7 @@ REWARD_MODULE="$PROJECT_DIR/verl_rl/reward/openresearcher_reward.py"
 # ── Pre-flight checks ─────────────────────────────────────────────────────────
 if [ ! -f "$TRAIN_DATA" ]; then
     echo "ERROR: Training data not found at $TRAIN_DATA"
-    echo "See script header for generation instructions."
+    echo "Run: bash verl_rl/prepare_highpass_data.sh"
     exit 1
 fi
 if ! curl -s --max-time 5 "$SEARCH_SERVICE_URL" > /dev/null 2>&1; then
@@ -99,7 +82,7 @@ if ! curl -s --max-time 5 "$SEARCH_SERVICE_URL" > /dev/null 2>&1; then
 fi
 
 echo "=========================================="
-echo "OpenResearcher GRPO Training — v0.8"
+echo "OpenResearcher GRPO Training — v0.8 (A100)"
 echo "=========================================="
 echo "Project dir:    $PROJECT_DIR"
 echo "GPUs:           $CUDA_VISIBLE_DEVICES  (N=$N_GPUS, TP=$TP_SIZE)"
@@ -107,30 +90,11 @@ echo "Train data:     $TRAIN_DATA"
 echo "Val data:       $VAL_DATA"
 echo "Search service: $SEARCH_SERVICE_URL"
 echo "Experiment:     $EXPERIMENT_NAME"
-echo "lr=1e-5  clip_grad=0.5  bs=16  max_response=12288"
+echo "lr=1e-5  clip_grad=0.5  bs=16  TP=2  max_response=12288"
 echo "=========================================="
 
-HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
-NEMOTRON_GLOB="$HF_CACHE_DIR/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py"
-for f in $NEMOTRON_GLOB; do
-    if [ -f "$f" ]; then
-        if ! grep -q '_supports_flash_attn_2' "$f"; then
-            echo "Applying NemotronH flash attention patch to: $f"
-            cp "$PROJECT_DIR/verl_rl/patches/modeling_nemotron_h.py" "$f"
-        fi
-    fi
-done
-
-# Patch 2: mamba-ssm graceful import
-MAMBA_INIT=$("$PYTHON" -c "import mamba_ssm; print(mamba_ssm.__file__)" 2>/dev/null)
-if [ -n "$MAMBA_INIT" ] && ! grep -q 'except ImportError' "$MAMBA_INIT"; then
-    echo "Applying mamba-ssm graceful import patch to: $MAMBA_INIT"
-    cp "$PROJECT_DIR/verl_rl/patches/mamba_ssm__init__.py" "$MAMBA_INIT"
-fi
-
-
 # ── Apply verl tool schemas patch (idempotent) ────────────────────────────────
-VERL_SCHEMAS=$("$PYTHON" -c "import verl.tools.schemas; print(verl.tools.schemas.__file__)" 2>/dev/null)
+VERL_SCHEMAS=$("$PYTHON" -c "import verl.tools.schemas; print(verl.tools.schemas.__file__)" 2>/dev/null || true)
 if [ -n "$VERL_SCHEMAS" ] && ! grep -q 'extra="allow"' "$VERL_SCHEMAS" 2>/dev/null; then
     echo "Applying verl tool schemas patch..."
     cp "$PROJECT_DIR/verl_rl/patches/verl_tool_schemas.py" "$VERL_SCHEMAS"
@@ -164,7 +128,7 @@ export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug_v0.8.jsonl}"
     actor_rollout_ref.actor.optim.lr=1e-5 \
     actor_rollout_ref.actor.optim.clip_grad=0.5 \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -197,6 +161,7 @@ export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug_v0.8.jsonl}"
     trainer.n_gpus_per_node=$N_GPUS \
     trainer.nnodes=1 \
     trainer.total_epochs=2 \
+    trainer.resume_mode=auto \
     trainer.val_before_train=True \
     trainer.test_freq=10 \
     trainer.save_freq=10 \
