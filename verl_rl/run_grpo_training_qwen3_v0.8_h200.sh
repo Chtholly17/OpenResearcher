@@ -3,7 +3,7 @@
 #
 # Key design decisions vs earlier versions:
 #
-#   Data: qwen3_highpass (Nemotron pass_rate 0.875–1.0, 1874 examples)
+#   Data: qwen3_low_mid_pass (Nemotron pass_rate 0.5–0.875, 1874 examples)
 #     - 43% per-rollout correct rate vs 12% on mid-difficulty data
 #     - System prompt mandates browser.search (fixes memory-recall problem)
 #     - Reward penalises 0-search correct answers (0.3 vs 1.0)
@@ -24,7 +24,7 @@
 #          LUCENE_EXTRA_DIR="$PROJECT/tevatron" \
 #          CORPUS_PARQUET_PATH="$PROJECT/Tevatron/browsecomp-plus-corpus/data/*.parquet" \
 #          python -m uvicorn scripts.deploy_search_service:app --host 0.0.0.0 --port 8090
-#   2. Training data at data/qwen3_highpass/ (regenerate if system prompt changed):
+#   2. Training data at data/qwen3_low_mid_pass/ (regenerate if system prompt changed):
 #        python -c "
 #          from datasets import load_dataset, Dataset
 #          import sys; sys.path.insert(0, '.')
@@ -35,8 +35,8 @@
 #          ds = load_dataset('Chtholly17/OR_reject_sampling', split='train')
 #          hp = [r for r in ds if r['pass_rate'] >= 0.875]
 #          random.shuffle(hp)
-#          Dataset.from_list([make_verl_record(str(r['qid']),r['question'],r['correct_answer'],'train',i,'qwen3') for i,r in enumerate(hp[20:])]).to_parquet('data/qwen3_highpass/train.parquet')
-#          Dataset.from_list([make_verl_record(str(r['qid']),r['question'],r['correct_answer'],'test',i,'qwen3') for i,r in enumerate(hp[:20])]).to_parquet('data/qwen3_highpass/test.parquet')
+#          Dataset.from_list([make_verl_record(str(r['qid']),r['question'],r['correct_answer'],'train',i,'qwen3') for i,r in enumerate(hp[20:])]).to_parquet('data/qwen3_low_mid_pass/train.parquet')
+#          Dataset.from_list([make_verl_record(str(r['qid']),r['question'],r['correct_answer'],'test',i,'qwen3') for i,r in enumerate(hp[:20])]).to_parquet('data/qwen3_low_mid_pass/test.parquet')
 #        "
 #   3. conda activate openresearcher (or use full python path)
 #
@@ -49,7 +49,7 @@
 #
 #   # Override experiment name and data
 #   EXPERIMENT_NAME=grpo_v0.8_run2 \
-#   TRAIN_DATA=data/qwen3_highpass/train.parquet \
+#   TRAIN_DATA=data/qwen3_low_mid_pass/train.parquet \
 #   bash verl_rl/run_grpo_training_qwen3_v0.8.sh
 
 set -euo pipefail
@@ -70,17 +70,17 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
 
 # GPUs: training uses 4 GPUs with TP=2 (2 vLLM server groups)
 # Search service should be on the remaining GPUs (e.g. 0-1)
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
-N_GPUS="${N_GPUS:-4}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+N_GPUS="${N_GPUS:-8}"
 TP_SIZE="${TP_SIZE:-1}"
 
 # Data
-TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/qwen3_highpass/train.parquet}"
-VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/qwen3_highpass/test.parquet}"
+TRAIN_DATA="${TRAIN_DATA:-$PROJECT_DIR/data/qwen3_low_mid_pass/train.parquet}"
+VAL_DATA="${VAL_DATA:-$PROJECT_DIR/data/qwen3_low_mid_pass/test.parquet}"
 SEARCH_SERVICE_URL="${SEARCH_SERVICE_URL:-http://127.0.0.1:8090}"
 
 TIMESTAMP=$(date '+%m%d-%H%M')
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_v0.8_${TIMESTAMP}}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_0.375_0.5_${TIMESTAMP}}"
 
 TOOL_CONFIG="$PROJECT_DIR/verl_rl/config/tool_config/openresearcher_tool_config.yaml"
 INTERACTION_CONFIG="$PROJECT_DIR/verl_rl/config/interaction_config/openresearcher_interaction_config.yaml"
@@ -111,22 +111,22 @@ echo "lr=1e-5  clip_grad=0.5  bs=16  max_response=12288"
 echo "=========================================="
 
 HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
-NEMOTRON_GLOB="$HF_CACHE_DIR/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py"
-for f in $NEMOTRON_GLOB; do
-    if [ -f "$f" ]; then
-        if ! grep -q '_supports_flash_attn_2' "$f"; then
-            echo "Applying NemotronH flash attention patch to: $f"
-            cp "$PROJECT_DIR/verl_rl/patches/modeling_nemotron_h.py" "$f"
-        fi
-    fi
-done
+# NEMOTRON_GLOB="$HF_CACHE_DIR/modules/transformers_modules/OpenResearcher/OpenResearcher_hyphen_30B_hyphen_A3B/*/modeling_nemotron_h.py"
+# for f in $NEMOTRON_GLOB; do
+#     if [ -f "$f" ]; then
+#         if ! grep -q '_supports_flash_attn_2' "$f"; then
+#             echo "Applying NemotronH flash attention patch to: $f"
+#             cp "$PROJECT_DIR/verl_rl/patches/modeling_nemotron_h.py" "$f"
+#         fi
+#     fi
+# done
 
-# Patch 2: mamba-ssm graceful import
-MAMBA_INIT=$("$PYTHON" -c "import mamba_ssm; print(mamba_ssm.__file__)" 2>/dev/null)
-if [ -n "$MAMBA_INIT" ] && ! grep -q 'except ImportError' "$MAMBA_INIT"; then
-    echo "Applying mamba-ssm graceful import patch to: $MAMBA_INIT"
-    cp "$PROJECT_DIR/verl_rl/patches/mamba_ssm__init__.py" "$MAMBA_INIT"
-fi
+# # Patch 2: mamba-ssm graceful import
+# MAMBA_INIT=$("$PYTHON" -c "import mamba_ssm; print(mamba_ssm.__file__)" 2>/dev/null)
+# if [ -n "$MAMBA_INIT" ] && ! grep -q 'except ImportError' "$MAMBA_INIT"; then
+#     echo "Applying mamba-ssm graceful import patch to: $MAMBA_INIT"
+#     cp "$PROJECT_DIR/verl_rl/patches/mamba_ssm__init__.py" "$MAMBA_INIT"
+# fi
 
 
 # ── Apply verl tool schemas patch (idempotent) ────────────────────────────────
@@ -157,7 +157,7 @@ export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug_v0.8.jsonl}"
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
-    actor_rollout_ref.model.path=Qwen/Qwen3-8B \
+    actor_rollout_ref.model.path=/fsx-shared/juncheng/OpenResearcher/checkpoints/openresearcher_rl/grpo_qwen3_v0.8_0304-1056/global_step_100/actor/huggingface \
     actor_rollout_ref.model.trust_remote_code=False \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -196,7 +196,7 @@ export REWARD_DEBUG_LOG="${REWARD_DEBUG_LOG:-/tmp/reward_debug_v0.8.jsonl}"
     trainer.experiment_name="$EXPERIMENT_NAME" \
     trainer.n_gpus_per_node=$N_GPUS \
     trainer.nnodes=1 \
-    trainer.total_epochs=2 \
+    trainer.total_epochs=5 \
     trainer.val_before_train=True \
     trainer.test_freq=10 \
     trainer.save_freq=10 \

@@ -44,11 +44,11 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON=python3
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-PASS_RATE_MIN="${PASS_RATE_MIN:-0.875}"   # minimum Nemotron pass rate (inclusive)
-PASS_RATE_MAX="${PASS_RATE_MAX:-1.0}"     # maximum Nemotron pass rate (inclusive)
+PASS_RATE_MIN="${PASS_RATE_MIN:-0.375}"   # minimum Nemotron pass rate (inclusive)
+PASS_RATE_MAX="${PASS_RATE_MAX:-0.5}"     # maximum Nemotron pass rate (inclusive)
 N_TEST="${N_TEST:-20}"                    # number of held-out test examples
 SEED="${SEED:-42}"
-OUT_DIR="${OUT_DIR:-$PROJECT_DIR/data/qwen3_highpass}"
+OUT_DIR="${OUT_DIR:-$PROJECT_DIR/data/qwen3_low_mid_pass}"
 HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 
 # Parse --output-dir flag

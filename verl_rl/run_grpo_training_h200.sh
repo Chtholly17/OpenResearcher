@@ -1,10 +1,11 @@
 #!/bin/bash
-# Launch multi-turn GRPO training for OpenResearcher — H200 (141GB) optimized
+# Launch multi-turn GRPO training for OpenResearcher — H200 (141GB) optimized with LoRA
 #
 # Key differences from A100 version:
 #   - TP=2 → 4 vLLM server groups (2x rollout parallelism)
 #   - 64K context (vs 16K on A100) — fits 30B lm_head logits in 141GB
-#   - No FSDP param/optimizer offload — everything fits on-GPU
+#   - LoRA training (rank=64) — drastically reduces memory for long contexts
+#   - No FSDP param/optimizer offload — LoRA adapters fit on-GPU
 #   - Full 3-policy GRPO with KL loss (ref policy fits in memory)
 #   - Larger micro-batches for faster forward/backward
 #   - train_batch_size=8 for better gradient signal
@@ -29,7 +30,7 @@ export HF_PARALLEL_LOADING_WORKERS=8
 
 # ---- Configuration ----
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
+VERL_DIR="${VERL_DIR:-$(cd "$PROJECT_DIR/../verl" && pwd)}"
 echo "VERL_DIR: $VERL_DIR"
 CONFIG_PATH="$PROJECT_DIR/verl_rl/config"
 
@@ -53,7 +54,7 @@ REWARD_MODULE="$PROJECT_DIR/verl_rl/reward/openresearcher_reward.py"
 
 # Experiment naming
 TIMESTAMP=$(date '+%m%d-%H%M')
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_h200_${TIMESTAMP}}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_h200_lora_${TIMESTAMP}}"
 
 # ---- Download data if not present ----
 HF_DATA_REPO="PahaII/openresearcher-training-data"
@@ -115,7 +116,7 @@ if ! curl -s --max-time 5 "$SEARCH_SERVICE_URL" > /dev/null 2>&1; then
 fi
 
 echo "=========================================="
-echo "OpenResearcher GRPO Training (H200)"
+echo "OpenResearcher GRPO Training (H200+LoRA)"
 echo "=========================================="
 echo "Project dir:    $PROJECT_DIR"
 echo "verl dir:       $VERL_DIR"
@@ -177,28 +178,31 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
     algorithm.adv_estimator=grpo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA" \
-    data.train_batch_size=8 \
+    data.train_batch_size=16 \
     data.max_prompt_length=4096 \
-    data.max_response_length=47104 \
+    data.max_response_length=98304 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
     actor_rollout_ref.model.path=OpenResearcher/OpenResearcher-30B-A3B \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    +actor_rollout_ref.model.lora.rank=64 \
+    +actor_rollout_ref.model.lora.alpha=128 \
+    +actor_rollout_ref.model.lora.target_modules='["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]' \
     actor_rollout_ref.actor.ppo_mini_batch_size=8 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
-    actor_rollout_ref.actor.fsdp_config.param_offload=True \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bf16 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
-    actor_rollout_ref.rollout.max_model_len=51200 \
-    actor_rollout_ref.rollout.n=6 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
+    actor_rollout_ref.rollout.max_model_len=102400 \
+    actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.max_num_seqs=64 \
     actor_rollout_ref.rollout.calculate_log_probs=True \

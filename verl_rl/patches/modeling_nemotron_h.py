@@ -63,7 +63,7 @@ try:
     #from mamba_ssm.ops.triton.layernorm_gated import RMSNorm as RMSNormGated
     from mamba_ssm.ops.triton.layernorm_gated import rmsnorm_fn
 except ImportError:
-    raise ImportError("mamba-ssm is required by the Mamba model but cannot be imported")
+    rmsnorm_fn = None 
 
 if is_causal_conv1d_available():
     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
@@ -269,14 +269,31 @@ class MambaRMSNormGated(torch.nn.Module):
 
     # jan28b version
     def forward(self, hidden_states, gate=None):
-        return rmsnorm_fn(x=hidden_states,
-                          weight=self.weight,
-                          bias=None, # No bias
-                          z=gate,
-                          eps=self.variance_epsilon,
-                          group_size=self.group_size,
-                          norm_before_gate=False
-        )
+        if rmsnorm_fn is not None:
+            return rmsnorm_fn(x=hidden_states,
+                              weight=self.weight,
+                              bias=None, # No bias
+                              z=gate,
+                              eps=self.variance_epsilon,
+                              group_size=self.group_size,
+                              norm_before_gate=False
+            )
+        else:
+            # Fallback implementation using PyTorch
+            input_dtype = hidden_states.dtype
+            hidden_states = hidden_states.to(torch.float32)
+
+            # RMSNorm
+            variance = hidden_states.pow(2).mean(-1, keepdim=True)
+            hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+            hidden_states = self.weight.to(torch.float32) * hidden_states
+
+            # Apply gating if gate is provided
+            if gate is not None:
+                gate = gate.to(torch.float32)
+                hidden_states = hidden_states * torch.nn.functional.silu(gate)
+
+            return hidden_states.to(input_dtype)
 
 class NemotronHMamba2Mixer(nn.Module):
     """
@@ -864,6 +881,33 @@ class NemotronHMOE(nn.Module):
         hidden_states = self.moe(hidden_states, topk_indices, topk_weights).view(*orig_shape)
         hidden_states = hidden_states + self.shared_experts(residuals)
         return hidden_states
+
+    def get_expert_mapping(self) -> list:
+        """
+        Returns expert weight mapping for vLLM LoRA support.
+        Format: list[tuple[str, str, int, str]]
+        Each tuple is (param_name, weight_name, expert_id, shard_id)
+        """
+        num_experts = self.config.n_routed_experts
+        expert_mapping = []
+
+        for expert_id in range(num_experts):
+            # Map up_proj (equivalent to gate_proj in some models)
+            expert_mapping.append((
+                f"experts.{expert_id}.up_proj",  # param_name in vLLM
+                f"experts.{expert_id}.up_proj.",  # weight_name in checkpoint
+                expert_id,  # expert_id
+                "up"  # shard_id
+            ))
+            # Map down_proj
+            expert_mapping.append((
+                f"experts.{expert_id}.down_proj",  # param_name in vLLM
+                f"experts.{expert_id}.down_proj.",  # weight_name in checkpoint
+                expert_id,  # expert_id
+                "down"  # shard_id
+            ))
+
+        return expert_mapping
 
 
 class NemotronHTopkRouter(nn.Module):

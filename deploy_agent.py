@@ -15,7 +15,7 @@ from openai_harmony import (
     StreamableParser, load_harmony_encoding, HarmonyEncodingName
 )
 from browser import BrowserTool, LocalServiceBrowserBackend, SerperServiceBrowserBackend
-from data_utils import load_dataset, list_available_datasets, DEVELOPER_CONTENT, TOOL_CONTENT
+from data_utils import load_dataset, list_available_datasets, DEVELOPER_CONTENT, TOOL_CONTENT, DEVELOPER_CONTENT_CLAUDE
 import dotenv
 import json5
 import re
@@ -179,6 +179,157 @@ async def _generate_with_retry(
     raise RuntimeError("Generation failed after retries without a captured exception.")
 
 
+async def run_one_native(
+    question: str,
+    qid: Any,
+    generator: Any,
+    browser_pool: BrowserPool,
+    max_rounds: int = 200,
+) -> List[dict]:
+    """
+    Native API tool calling for Bedrock and other API-based generators
+    Uses generator.chat_completion() with native tool use blocks
+    """
+    # Initialize browser session and get tool config
+    tool_config = browser_pool.init_session(qid)
+
+    # Initialize tokenizer
+    if hasattr(generator, '_init_tokenizer'):
+        await generator._init_tokenizer()
+
+    # Choose system prompt based on model type
+    if 'bedrock' in generator.__class__.__name__.lower() or \
+       (hasattr(generator, 'model_id') and 'claude' in getattr(generator, 'model_id', '').lower()):
+        base_prompt = DEVELOPER_CONTENT_CLAUDE
+    else:
+        base_prompt = DEVELOPER_CONTENT
+    system_prompt = base_prompt + f"\n\nToday's date: {datetime.datetime.now().strftime('%Y-%m-%d')}"
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt,
+        },
+        {
+            "role": "user",
+            "content": question,
+        }
+    ]
+
+    # Parse TOOL_CONTENT from JSON string to list
+    tools = json.loads(TOOL_CONTENT)
+
+    round_num = 0
+
+    try:
+        while round_num < max_rounds:
+            round_num += 1
+
+            print(f"\n[qid={qid}] {'='*50}")
+            print(f"[qid={qid}] Round {round_num}/{max_rounds} (Native API) | msgs_so_far={len(messages)}")
+            print(f"[qid={qid}] {'='*50}", flush=True)
+
+            # Call chat completion with tools
+            response = await generator.chat_completion(
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=1.0,
+                max_tokens=8192
+            )
+
+            # Extract message from response
+            message = response["choices"][0]["message"]
+            content = message.get("content", "")
+            tool_calls = message.get("tool_calls", [])
+
+            content_preview = content[:300] if len(content) > 300 else content
+            print(f"[qid={qid}] Round {round_num} MODEL RESPONSE: content_len={len(content)}, tool_calls={len(tool_calls)}")
+            print(f"[qid={qid}] Round {round_num} CONTENT PREVIEW: {content_preview!r}", flush=True)
+
+            # Add assistant message
+            messages.append({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls if tool_calls else None
+            })
+
+            # Execute tool calls if present
+            if tool_calls:
+                for tc_idx, tool_call in enumerate(tool_calls):
+                    tool_id = tool_call["id"]
+                    function_name = tool_call["function"]["name"]
+                    function_args_raw = tool_call["function"]["arguments"]
+
+                    try:
+                        # Parse arguments
+                        if isinstance(function_args_raw, dict):
+                            function_args = function_args_raw
+                        else:
+                            function_args = json.loads(function_args_raw)
+
+                        print(f"[qid={qid}] Round {round_num} TOOL_CALL[{tc_idx}]: {function_name}({json.dumps(function_args, ensure_ascii=False)[:200]})", flush=True)
+
+                        # Extract actual function name from browser.xxx format
+                        if function_name.startswith("browser."):
+                            actual_function_name = function_name.split(".", 1)[1]
+                        else:
+                            actual_function_name = function_name
+
+                        # Execute browser tool
+                        if actual_function_name.lower() in ['search', 'find', 'open']:
+                            result = await browser_pool.call_tool(qid, actual_function_name, function_args)
+                            if not result:
+                                result = f"{function_name} completed"
+                        else:
+                            result = f"Tool {function_name} not available"
+
+                        # Add tool response
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": result
+                        })
+
+                        result_preview = result[:200] if len(result) > 200 else result
+                        print(f"[qid={qid}] Round {round_num} TOOL_RESULT[{tc_idx}]: len={len(result)}, preview={result_preview!r}", flush=True)
+
+                    except Exception as e:
+                        error_msg = f"Error executing {function_name}: {str(e)}"
+                        print(f"[qid={qid}] Round {round_num} TOOL_ERROR[{tc_idx}]: {error_msg}", flush=True)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": error_msg
+                        })
+
+                # Continue to next round
+                continue
+
+            # Check for answer termination
+            content_lower = content.lower()
+            if '<answer>' in content_lower and '</answer>' in content_lower:
+                print(f"[qid={qid}] ✅ Round {round_num}: Found <answer> tag - DONE", flush=True)
+                break
+
+            if "exact answer:" in content_lower and "confidence:" in content_lower:
+                print(f"[qid={qid}] ✅ Round {round_num}: Found 'Exact Answer:' + 'Confidence:' - DONE", flush=True)
+                break
+
+            if "final answer:" in content_lower or "answer:" in content_lower:
+                print(f"[qid={qid}] ✅ Round {round_num}: Found 'Final Answer:' or 'Answer:' - DONE", flush=True)
+                break
+
+            # No tool calls and no answer detected — this is an unexpected state
+            print(f"[qid={qid}] Round {round_num}: No tool calls, no answer detected — ending conversation", flush=True)
+            break
+
+        print(f"[qid={qid}] Finished after {round_num} rounds, total messages={len(messages)}", flush=True)
+        return messages
+
+    finally:
+        browser_pool.cleanup(qid)
+
+
 async def run_one(
     question: str,
     qid: Any,
@@ -189,7 +340,16 @@ async def run_one(
     """
     Helper function for native tool calling using tokenizer's chat template
     Uses tokenizer.apply_chat_template with tools parameter instead of OpenAI API
+
+    Dispatches to run_one_native for Bedrock/API-based generators
     """
+    # Detect if using native API (Bedrock)
+    use_native = 'bedrock' in generator.__class__.__name__.lower()
+
+    if use_native:
+        vprint(f"[DISPATCH] Using native API path for {generator.__class__.__name__}")
+        return await run_one_native(question, qid, generator, browser_pool, max_rounds)
+
     # Initialize browser session and get tool config
     tool_config = browser_pool.init_session(qid)
 
@@ -449,7 +609,16 @@ def worker_entry(
     async def _run():
         try:
             # Initialize generator based on mode
-            if args.vllm_server_url:
+            if args.use_bedrock:
+                # Use AWS Bedrock Claude
+                from utils.bedrock_generator import BedrockAsyncGenerator
+                generator = BedrockAsyncGenerator(
+                    model_id=args.bedrock_model_id or args.model_name_or_path,
+                    region_name=args.bedrock_region,
+                    max_tokens_default=8192
+                )
+                vprint(f"[Worker {worker_idx}] Using AWS Bedrock: {generator.model_id}")
+            elif args.vllm_server_url:
                 # Get the server URL for this worker
                 if hasattr(args, 'vllm_server_urls') and len(args.vllm_server_urls) > 1:
                     server_url = args.vllm_server_urls[worker_idx % len(args.vllm_server_urls)]
@@ -512,11 +681,15 @@ def worker_entry(
                 # then the huggingface path is OpenResearcher/OpenResearcher-Dataset
                 # the subset is seed_42 and the split is train
                 # extract path, subset, split from args.dataset_name
-                from datasets import load_dataset as hf_load_dataset
-                path, subset_and_split = args.dataset_name.split('@')
-                subset, split = subset_and_split.split(':')
-                data = hf_load_dataset(path, data_dir=subset, split=split)
-                # data = load_dataset(args.dataset_name)
+                try:
+                    data = load_dataset(args.dataset_name)
+                except Exception as e:
+                    vprint(f"Error loading dataset {args.dataset_name}, Try to load from HuggingFace directly")
+                    from datasets import load_dataset as hf_load_dataset
+                    path, subset_and_split = args.dataset_name.split('@')
+                    subset, split = subset_and_split.split(':')
+                    data = hf_load_dataset(path, data_dir=subset, split=split)
+                    # data = load_dataset(args.dataset_name)
 
             total_workers = node_size * num_workers
             global_worker_idx = num_workers * node_rank + worker_idx
@@ -584,7 +757,9 @@ def worker_entry(
 
             builtins.print = _tqdm_print
 
-            with open(shard_path, "a", encoding="utf-8") as writer:
+            error_log_path = os.path.join(args.output_dir, f"error_log_node_{node_rank}_shard_{worker_idx}.jsonl")
+            with open(shard_path, "a", encoding="utf-8") as writer, \
+                 open(error_log_path, "a", encoding="utf-8") as error_writer:
                 progress_bar = tqdm.tqdm(
                     total=len(tasks_to_process),
                     desc=f"Worker {worker_idx} progress",
@@ -595,8 +770,20 @@ def worker_entry(
                 try:
                     for fut in asyncio.as_completed(tasks):
                         rec = await fut
-                        writer.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                        writer.flush()
+                        if rec.get("status") == "fail":
+                            # Log bug to error file, do NOT store trajectory
+                            error_entry = {
+                                "qid": rec.get("qid"),
+                                "error": rec.get("error"),
+                                "attempts": rec.get("attempts"),
+                                "timestamp": datetime.datetime.now().isoformat(),
+                            }
+                            error_writer.write(json.dumps(error_entry, ensure_ascii=False) + "\n")
+                            error_writer.flush()
+                            print(f"[Worker {worker_idx}] BUG qid={rec.get('qid')}: logged to {error_log_path}", flush=True)
+                        else:
+                            writer.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                            writer.flush()
                         progress_bar.update(1)
                 finally:
                     progress_bar.close()
@@ -631,6 +818,14 @@ def main():
         action="store_true",
         help="Enable verbose logging (detailed progress and debug output)",
     )
+    parser.add_argument("--use_bedrock", action="store_true",
+                        help="Use AWS Bedrock Claude instead of vLLM")
+    parser.add_argument("--bedrock_model_id", type=str, default=None,
+                        help="Bedrock model ID (default: use model_name_or_path)")
+    parser.add_argument("--bedrock_region", type=str, default="us-east-1",
+                        help="AWS region for Bedrock")
+    parser.add_argument("--bedrock_workers", type=int, default=4,
+                        help="Number of concurrent workers for Bedrock mode")
 
     args = parser.parse_args()
 
@@ -643,7 +838,14 @@ def main():
     # Auto-detect number of available CUDA devices
     import torch
 
-    if args.vllm_server_url:
+    if args.use_bedrock:
+        # Using AWS Bedrock - CPU-based, no GPUs needed
+        NUM_WORKERS = args.bedrock_workers
+        available_gpu_ids = []
+        vprint(f"Using AWS Bedrock: {args.bedrock_model_id or args.model_name_or_path}")
+        vprint(f"Region: {args.bedrock_region}")
+        vprint(f"Launching {NUM_WORKERS} workers (CPU-based)")
+    elif args.vllm_server_url:
         # Parse server URLs (support comma-separated list)
         server_urls = [url.strip() for url in args.vllm_server_url.split(',')]
         args.vllm_server_urls = server_urls  # Store as list

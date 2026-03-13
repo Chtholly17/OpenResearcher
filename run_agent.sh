@@ -16,6 +16,41 @@ SEARCH_URL="http://localhost:8000"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+# Set PYTHONPATH to use venv packages
+if [ -d ".venv/lib/python3.12/site-packages" ]; then
+    export PYTHONPATH=".venv/lib/python3.12/site-packages:$PYTHONPATH"
+fi
+
+# Check if using Bedrock mode
+if [ "$BASE_PORT" = "bedrock" ]; then
+    echo "=========================================="
+    echo "Starting Agent with AWS Bedrock Claude"
+    echo "=========================================="
+    echo "Model: $MODEL"
+    echo "Region: ${AWS_REGION:-us-east-1}"
+    echo "Workers: ${NUM_SERVERS:-4}"
+    echo "Dataset: $DATASET_NAME"
+    echo "Browser Backend: $BROWSER_BACKEND"
+    echo "Output Directory: $OUTPUT_DIR"
+    echo "=========================================="
+    echo ""
+
+    python3 deploy_agent.py \
+        --output_dir "$OUTPUT_DIR" \
+        --model_name_or_path "$MODEL" \
+        --search_url "$SEARCH_URL" \
+        --dataset_name "$DATASET_NAME" \
+        --browser_backend "$BROWSER_BACKEND" \
+        --use_bedrock \
+        --bedrock_model_id "$MODEL" \
+        --bedrock_region "${AWS_REGION:-us-east-1}" \
+        --bedrock_workers "${NUM_SERVERS:-4}" \
+        --max_concurrency_per_worker 8 \
+        --verbose
+
+    exit 0
+fi
+
 # Build comma-separated server URLs
 SERVER_URLS=""
 for i in $(seq 0 $((NUM_SERVERS-1))); do
@@ -52,7 +87,7 @@ if [ "$DATASET_NAME" = "browsecomp_plus" ]; then
     echo "Using local BrowseComp-Plus dataset: $DATA_PATH"
     echo ""
 
-    python deploy_agent.py \
+    python3 deploy_agent.py \
         --output_dir "$OUTPUT_DIR" \
         --model_name_or_path "$MODEL" \
         --search_url "$SEARCH_URL" \
@@ -68,7 +103,7 @@ else
     echo "Available datasets: browsecomp, gaia, xbench"
     echo ""
 
-    python deploy_agent.py \
+    python3 deploy_agent.py \
         --output_dir "$OUTPUT_DIR" \
         --model_name_or_path "$MODEL" \
         --search_url "$SEARCH_URL" \
